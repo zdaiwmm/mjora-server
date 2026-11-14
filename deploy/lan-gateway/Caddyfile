@@ -1,0 +1,21 @@
+{
+	admin off
+	persist_config off
+	auto_https disable_redirects
+	skip_install_trust
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://{$MJORA_LAN_IP}:8443 {
+	bind {$MJORA_LAN_IP}
+	tls internal
+	@api path /api /api/*
+	handle @api {
+		reverse_proxy http://127.0.0.1:2283
+	}
+	handle {
+		respond 404
+	}
+}

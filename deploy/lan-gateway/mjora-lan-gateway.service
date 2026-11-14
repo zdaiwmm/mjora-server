@@ -1,0 +1,19 @@
+[Unit]
+Description=mjora LAN HTTPS API gateway
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/mjora-lan-gateway/gateway.env
+Environment=XDG_DATA_HOME=%h/.local/share/mjora-lan-gateway
+Environment=XDG_CONFIG_HOME=%h/.config/mjora-lan-gateway
+WorkingDirectory=%h/.config/mjora-lan-gateway
+ExecStart=%h/.local/lib/mjora-lan-gateway/caddy run --config %h/.config/mjora-lan-gateway/Caddyfile --adapter caddyfile
+UMask=0077
+NoNewPrivileges=true
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,126 +1,54 @@
-<p align="center"> 
-  <br/>
-  <a href="https://opensource.org/license/agpl-v3"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?color=3F51B5&style=for-the-badge&label=License&logoColor=000000&labelColor=ececec" alt="License: AGPLv3"></a>
-  <a href="https://discord.immich.app">
-    <img src="https://img.shields.io/discord/979116623879368755.svg?label=Discord&logo=Discord&style=for-the-badge&logoColor=000000&labelColor=ececec" alt="Discord"/>
-  </a>
-  <br/>
-  <br/>
-</p>
+# mjora-server
 
-<p align="center">
-<img src="design/immich-logo-stacked-light.svg" width="300" title="Login With Custom URL">
-</p>
-<h3 align="center">High performance self-hosted photo and video management solution</h3>
-<br/>
-<a href="https://immich.app">
-<img src="design/immich-screenshots.png" title="Main Screenshot">
-</a>
-<br/>
+mjora 的服务端开发仓库，由 [Immich](https://github.com/immich-app/immich) 派生。手机应用源码位于 [zdaiwmm/mjora](https://github.com/zdaiwmm/mjora)。
 
-<p align="center">
-  <a href="readme_i18n/README_ca_ES.md">Català</a>
-  <a href="readme_i18n/README_es_ES.md">Español</a>
-  <a href="readme_i18n/README_fr_FR.md">Français</a>
-  <a href="readme_i18n/README_it_IT.md">Italiano</a>
-  <a href="readme_i18n/README_ja_JP.md">日本語</a>
-  <a href="readme_i18n/README_ko_KR.md">한국어</a>
-  <a href="readme_i18n/README_de_DE.md">Deutsch</a>
-  <a href="readme_i18n/README_nl_NL.md">Nederlands</a>
-  <a href="readme_i18n/README_tr_TR.md">Türkçe</a>
-  <a href="readme_i18n/README_zh_CN.md">简体中文</a>
-  <a href="readme_i18n/README_zh_TW.md">正體中文</a>
-  <a href="readme_i18n/README_uk_UA.md">Українська</a>
-  <a href="readme_i18n/README_ru_RU.md">Русский</a>
-  <a href="readme_i18n/README_bg_BG.md">Български</a>
-  <a href="readme_i18n/README_pl_PL.md">Polski</a>
-  <a href="readme_i18n/README_pt_BR.md">Português Brasileiro</a>
-  <a href="readme_i18n/README_sv_SE.md">Svenska</a>
-  <a href="readme_i18n/README_ar_JO.md">العربية</a>
-  <a href="readme_i18n/README_vi_VN.md">Tiếng Việt</a>
-  <a href="readme_i18n/README_th_TH.md">ภาษาไทย</a>
-  <a href="readme_i18n/README_ml_IN.md">മലയാളം</a>
-</p>
+服务端源码基线为 **Immich v3.4.1**，提交 `22b95194c80a2f2e6201093916b6c8c3d6d271dd`。默认开发分支为 `mjora`，保留官方 Git 历史和原始 [AGPL-3.0 许可证](LICENSE)，便于审阅及合并后续功能。原项目介绍与贡献者信息保存在 [README.upstream.md](README.upstream.md)。
 
+## 代码范围
 
-> [!WARNING]
-> ⚠️ Always follow [3-2-1](https://www.backblaze.com/blog/the-3-2-1-backup-strategy/) backup plan for your precious photos and videos!
-> 
- 
+- `server/`：API、任务处理和数据库相关源码。
+- `machine-learning/`：机器学习服务。
+- `web/`、`i18n/`、`packages/`、`.mise/`：服务端镜像所需的 Web 页面、翻译、SDK、CLI 和构建工具。
+- `docker/`、`deployment/`：上游部署文件。
+- [deploy/lan-gateway/](deploy/lan-gateway/README.md)：mjora 的可选局域网 HTTPS API 入口模板及证书信任说明。
 
-> [!NOTE]
-> You can find the main documentation, including installation guides, at https://immich.app/.
+`mjora` 分支移除了手机端的 `mobile/`、`native/`、`fastlane/`，以及继承的自动构建发布任务。仓库保留服务端镜像需要的构建依赖。实际家庭配置、账号、照片、证书及私钥保存在部署环境中。
 
-## Links
+## 本地开发与构建
 
-- [Documentation](https://docs.immich.app/)
-- [About](https://docs.immich.app/overview/introduction)
-- [Installation](https://docs.immich.app/install/requirements)
-- [Roadmap](https://immich.app/roadmap)
-- [Demo](#demo)
-- [Features](#features)
-- [Translations](https://docs.immich.app/developer/translations)
-- [Contributing](https://docs.immich.app/overview/support-the-project)
+本地 `origin` 指向 `https://github.com/zdaiwmm/mjora-server.git`，`upstream` 指向官方仓库，并禁用向 `upstream` 推送。`mjora` 跟踪 `origin/mjora`；日常提交与推送进入自己的仓库。
 
-## Demo
+本次创建的工作副本使用稀疏检出，已包含服务端镜像的构建输入。需要查看全部非手机端目录时，可执行 `git sparse-checkout disable`。
 
-Access the demo [here](https://demo.immich.app). For the mobile app, you can use `https://demo.immich.app` for the `Server Endpoint URL`.
+保留了上游的依赖锁文件和 Dockerfile。按上游要求准备 Docker 后，可在仓库根目录构建开发镜像：
 
-### Login credentials
+```sh
+docker build -f server/Dockerfile -t mjora-server:dev .
+```
 
-| Email           | Password |
-| --------------- | -------- |
-| demo@immich.app | demo     |
+运行环境仍由部署者单独管理。本次仓库整理没有升级或重启正在运行的照片服务，也没有执行数据库迁移。网关模板验证通过不代表已经重新构建或验收整套服务端镜像。
 
-## Features
+## 合并官方更新
 
-| Features                                     | Mobile | Web |
-| :------------------------------------------- | ------ | --- |
-| Upload and view videos and photos            | Yes    | Yes |
-| Auto backup when the app is opened           | Yes    | N/A |
-| Prevent duplication of assets                | Yes    | Yes |
-| Selective album(s) for backup                | Yes    | N/A |
-| Download photos and videos to local device   | Yes    | Yes |
-| Multi-user support                           | Yes    | Yes |
-| Album and Shared albums                      | Yes    | Yes |
-| Scrubbable/draggable scrollbar               | Yes    | Yes |
-| Support raw formats                          | Yes    | Yes |
-| Metadata view (EXIF, map)                    | Yes    | Yes |
-| Search by metadata, objects, faces, and CLIP | Yes    | Yes |
-| Administrative functions (user management)   | No     | Yes |
-| Background backup                            | Yes    | N/A |
-| Virtual scroll                               | Yes    | Yes |
-| OAuth support                                | Yes    | Yes |
-| API Keys                                     | N/A    | Yes |
-| LivePhoto/MotionPhoto backup and playback    | Yes    | Yes |
-| Support 360 degree image display             | No     | Yes |
-| User-defined storage structure               | Yes    | Yes |
-| Public Sharing                               | Yes    | Yes |
-| Archive and Favorites                        | Yes    | Yes |
-| Global Map                                   | Yes    | Yes |
-| Partner Sharing                              | Yes    | Yes |
-| Facial recognition and clustering            | Yes    | Yes |
-| Memories (x years ago)                       | Yes    | Yes |
-| Offline support                              | Yes    | No  |
-| Read-only gallery                            | Yes    | Yes |
-| Stacked Photos                               | Yes    | Yes |
-| Tags                                         | No     | Yes |
-| Folder View                                  | Yes    | Yes |
+在临时更新分支审阅新版本，保留官方共同历史：
 
-## Translations
+```sh
+git fetch upstream --tags
+git switch mjora
+git switch -c update/immich-vX.Y.Z
+git merge --no-ff --no-commit vX.Y.Z
+```
 
-Read more about translations [here](https://docs.immich.app/developer/translations).
+把 `vX.Y.Z` 替换为已审阅的目标版本。处理冲突时保留自己的说明和网关模板，并检查上游构建依赖是否变化。上游新增的手机端文件或工作流可能直接合并成功，因此每次合并后、提交前，还要显式移除这些路径并确认检查结果为空：
 
-<a href="https://hosted.weblate.org/engage/immich/">
-<img src="https://hosted.weblate.org/widget/immich/immich/multi-auto.svg" alt="Translation status" />
-</a>
+```sh
+git rm -r --sparse --ignore-unmatch mobile native fastlane .github/workflows CODEOWNERS
+git ls-files mobile native fastlane .github/workflows CODEOWNERS
+git diff --cached --name-status
+```
 
-## Repository activity
+随后验证依赖、镜像和测试，审阅数据库迁移及恢复方式，再提交并合并到 `mjora`。生产升级另行安排；本仓库没有自动部署生产环境的任务。
 
-![Activities](https://repobeats.axiom.co/api/embed/9e86d9dc3ddd137161f2f6d2e758d7863b1789cb.svg "Repobeats analytics image")
+## 本次验证范围
 
-## Contributors
-
-<a href="https://github.com/immich-app/immich/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=immich-app/immich" width="100%"/>
-</a>
+服务端、Web、机器学习和构建依赖源码与官方 v3.4.1 保持一致。新增网关模板已用固定版本 Caddy 验证配置及路由，私有部署输入已排除。初始化没有执行完整的服务端镜像构建；手机端的后台及局域网上传验收记录见 [mjora 验证说明](https://github.com/zdaiwmm/mjora/blob/main/docs/validation/2026-11-14-background-runtime-validation.md)。

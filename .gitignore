@@ -29,3 +29,12 @@ vite.config.js.timestamp-*
 *.tsbuildinfo
 *.tsbuildInfo
 misc/release/notes.md
+
+# mjora deployment identities and actual host configuration
+/deploy/**/gateway.env
+/deploy/**/LocalServerIdentity*.json
+/deploy/**/*.key
+/deploy/**/*.pem
+/deploy/**/*.crt
+/deploy/**/data/
+/deploy/**/config/

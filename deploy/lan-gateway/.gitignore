@@ -1,0 +1,13 @@
+# Local deployment inputs and generated identity material stay outside Git.
+gateway.env
+.env
+caddy
+caddy_*.tar.gz
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+LocalServerIdentity*.json
+data/
+config/
