@@ -14,6 +14,11 @@
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
   <key>Umask</key><integer>63</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DEVELOPER_DIR</key><string>/Applications/Xcode.app/Contents/Developer</string>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
   <key>StandardOutPath</key><string>/Users/YOU/Library/Application Support/ConfirmedUpdate/state/host.log</string>
   <key>StandardErrorPath</key><string>/Users/YOU/Library/Application Support/ConfirmedUpdate/state/host.log</string>
 </dict>

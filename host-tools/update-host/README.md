@@ -21,6 +21,8 @@ Use `/opt/homebrew/bin/python3` or another current Python 3 installation on macO
 
 `config.example.json` shows the exact schema (no additional fields). `listenHost` is a local bind address; use a reachable LAN address or `0.0.0.0` when the paired phone should connect over Wi-Fi. `hostId` is an opaque non-secret identifier. The device, team, bundles, group and approved enrollment digest are set by the Mac owner and cannot be changed by a request. The Mac must be awake and logged in. The paired phone must be reachable through Xcode device services, with any necessary unlock/pairing already completed. Both `localNetwork` and `wired` paired transports are accepted; receipts record the observed transport.
 
+The LaunchAgent template sets `DEVELOPER_DIR` to the full Xcode installation so `xcrun devicectl` is available even when the shell selects Command Line Tools. Adjust this path if Xcode is installed elsewhere.
+
 ## Manifest and digests
 
 `release.example.json` shows all required private fields. `build` is a string matching `CFBundleVersion`; `version` matches `CFBundleShortVersionString`. Both must match the main app and share extension. The signed main app's `Info.plist` must also contain `MJoraSourceRevision` equal to `sourceRevision`; stamp it before signing. `releaseId` must identify one immutable prepared package. `sourceRevision` is its reviewed source revision, represented by 40 or 64 lowercase hexadecimal characters.
