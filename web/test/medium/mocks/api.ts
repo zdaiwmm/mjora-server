@@ -85,6 +85,14 @@ export class MockNetwork extends Dispatcher {
     socket.send(`42${JSON.stringify(payload === undefined ? [event] : [event, payload])}`);
   }
 
+  async disconnectSocket() {
+    const socket = sockets.get(this.context);
+    if (!socket) {
+      throw new Error('No websocket connection has been established by the page');
+    }
+    await socket.close({ code: 1012, reason: 'Synthetic reconnect test' });
+  }
+
   override recordDownload(url: URL) {
     if (this.routedUrls.has(url.href)) {
       return;

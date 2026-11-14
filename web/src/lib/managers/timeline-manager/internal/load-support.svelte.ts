@@ -1,6 +1,7 @@
 import { authManager } from '#lib/managers/auth-manager.svelte.ts';
 import { toISOYearMonthUTC } from '#lib/utils/timeline-util.ts';
-import { getTimeBucket } from '@immich/sdk';
+import { getTimeBucket, type TimeBucketAssetResponseDto } from '@immich/sdk';
+import { isEqual } from 'lodash-es';
 import { TimelineManager } from '../timeline-manager.svelte';
 import type { TimelineMonth } from '../timeline-month.svelte';
 import type { TimelineManagerOptions } from '../types';
@@ -10,10 +11,15 @@ export async function loadFromTimeBuckets(
   timelineMonth: TimelineMonth,
   options: TimelineManagerOptions,
   signal: AbortSignal,
+  refresh = false,
+  isCurrent = () => true,
 ): Promise<void> {
-  if (timelineMonth.getFirstAsset()) {
+  if (!refresh && timelineMonth.getFirstAsset()) {
     return;
   }
+  const revision = timelineManager.assetChangeRevision;
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const before = new Map(refresh ? $state.snapshot(timelineMonth.getAssets()).map((asset) => [asset.id, asset]) : []);
 
   const timeBucket = toISOYearMonthUTC(timelineMonth.yearMonth);
   const bucketResponse = await getTimeBucket(
@@ -25,7 +31,7 @@ export async function loadFromTimeBuckets(
     { signal },
   );
 
-  if (!bucketResponse || signal.aborted) {
+  if (!bucketResponse || signal.aborted || !isCurrent() || !timelineManager.months.includes(timelineMonth)) {
     return;
   }
 
@@ -38,15 +44,44 @@ export async function loadFromTimeBuckets(
       },
       { signal },
     );
-    if (!albumAssets || signal.aborted) {
+    if (!albumAssets || signal.aborted || !isCurrent() || !timelineManager.months.includes(timelineMonth)) {
       return;
     }
-    for (const id of albumAssets.id) {
-      timelineManager.albumAssets.add(id);
-    }
+    timelineManager.setAlbumAssets(timelineMonth, albumAssets.id);
   }
 
-  const unprocessedAssets = timelineMonth.addAssets(bucketResponse, true);
+  const current = refresh ? $state.snapshot(timelineMonth.getAssets()) : [];
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const currentIds = new Set(current.map((asset) => asset.id));
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const removed = new Set([...before.keys()].filter((id) => !currentIds.has(id)));
+  const newer = current.filter(
+    (asset) => timelineManager.wasUpsertedAfter(asset.id, revision) || !isEqual(asset, before.get(asset.id)),
+  );
+  const keep = bucketResponse.id
+    .map((_, index) => index)
+    .filter(
+      (index) =>
+        !removed.has(bucketResponse.id[index]) && !timelineManager.wasRemovedAfter(bucketResponse.id[index], revision),
+    );
+  const response = (
+    keep.length === bucketResponse.id.length
+      ? bucketResponse
+      : Object.fromEntries(
+          Object.entries(bucketResponse).map(([key, values]) => [
+            key,
+            Array.isArray(values) ? keep.map((index) => values[index]) : values,
+          ]),
+        )
+  ) as TimeBucketAssetResponseDto;
+  if (refresh) {
+    timelineMonth.timelineDays = [];
+  }
+
+  const unprocessedAssets = timelineMonth.addAssets(response, true);
+  if (newer.length > 0) {
+    timelineManager.upsertAssets(newer);
+  }
   if (unprocessedAssets.length > 0) {
     console.error(
       `Warning: getTimeBucket API returning assets not in requested month: ${timelineMonth.yearMonth.month}, ${JSON.stringify(

@@ -11,6 +11,7 @@ mjora 的服务端开发仓库，由 [Immich](https://github.com/immich-app/immi
 - `web/`、`i18n/`、`packages/`、`.mise/`：服务端镜像所需的 Web 页面、翻译、SDK、CLI 和构建工具。
 - `docker/`、`deployment/`：上游部署文件。
 - [deploy/lan-gateway/](deploy/lan-gateway/README.md)：mjora 的可选局域网 HTTPS API 入口模板及证书信任说明。
+- [deploy/web/](deploy/web/README.md)：在固定服务端版本上更新 Web 静态资源的候选镜像配方。
 
 `mjora` 分支移除了手机端的 `mobile/`、`native/`、`fastlane/`，以及继承的自动构建发布任务。仓库保留服务端镜像需要的构建依赖。实际家庭配置、账号、照片、证书及私钥保存在部署环境中。
 
@@ -51,4 +52,4 @@ git diff --cached --name-status
 
 ## 本次验证范围
 
-服务端、Web、机器学习和构建依赖源码与官方 v3.4.1 保持一致。新增网关模板已用固定版本 Caddy 验证配置及路由，私有部署输入已排除。初始化没有执行完整的服务端镜像构建；手机端的后台及局域网上传验收记录见 [mjora 验证说明](https://github.com/zdaiwmm/mjora/blob/main/docs/validation/2026-11-14-background-runtime-validation.md)。
+API 服务端、机器学习和构建依赖源码沿用官方 v3.4.1。Web 增加断线重连后的照片列表补查，修复与验证范围见 [Web 验证记录](deploy/web/VALIDATION.md)。网关模板已用固定版本 Caddy 验证配置及路由，私有部署输入已排除。初始化没有执行完整的服务端镜像构建；手机端的后台及局域网上传验收记录见 [mjora 验证说明](https://github.com/zdaiwmm/mjora/blob/main/docs/validation/2026-11-14-background-runtime-validation.md)。

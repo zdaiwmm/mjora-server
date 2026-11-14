@@ -63,11 +63,16 @@ export const websocketStore = {
 };
 
 export const websocketEvents = createEventEmitter(websocket);
+let hasConnected = false;
 
 // eslint-disable-next-line unicorn/no-top-level-side-effects
 websocket
   .on('connect', () => {
     eventManager.emit('WebsocketConnect');
+    if (hasConnected) {
+      eventManager.emit('WebsocketReconnect');
+    }
+    hasConnected = true;
     websocketStore.connected.set(true);
   })
   .on('disconnect', () => websocketStore.connected.set(false))
@@ -121,6 +126,7 @@ export const openWebsocketConnection = () => {
 };
 
 export const closeWebsocketConnection = () => {
+  hasConnected = false;
   websocket.disconnect();
 };
 

@@ -37,7 +37,7 @@ export class TimelineMonth {
   #height: number = $state(0);
   #top: number = $state(0);
 
-  #initialCount: number = 0;
+  #initialCount = $state(0);
   #sortOrder: AssetOrder = AssetOrder.Desc;
   #orderBy: AssetOrderBy = AssetOrderBy.TakenAt;
   percent: number = $state(0);
@@ -267,6 +267,10 @@ export class TimelineMonth {
   get viewId() {
     const { year, month } = this.yearMonth;
     return year + '-' + month;
+  }
+
+  updateInitialCount(count: number) {
+    this.#initialCount = count;
   }
 
   set height(height: number) {

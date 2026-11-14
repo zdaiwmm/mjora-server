@@ -32,6 +32,7 @@ import {
   getAssetInfo,
   getTimeBuckets,
   type AssetResponseDto,
+  type TimeBucketsResponseDto,
 } from '@immich/sdk';
 import { clamp, isEqual } from 'lodash-es';
 import { SvelteDate, SvelteSet } from 'svelte/reactivity';
@@ -103,6 +104,67 @@ export class TimelineManager extends VirtualScrollManager {
   #updatingViewportProximities = false;
   #scrollableElement: HTMLElement | undefined = $state();
   #unsubscribes: Array<() => void> = [];
+  #generation = 0;
+  #destroyed = false;
+  #refreshTask: Promise<void> | undefined;
+  #refreshAgain = false;
+  #refreshController: AbortController | undefined;
+  #refreshRevision = 0;
+  // Request bookkeeping is deliberately nonreactive; only timeline state drives rendering.
+  /* eslint-disable svelte/prefer-svelte-reactivity */
+  #staleMonths = new Set<TimelineMonth>();
+  #monthRefreshTasks = new Map<TimelineMonth, { revision: number; controller: AbortController; task: Promise<void> }>();
+  #assetChangeRevision = 0;
+  #removedAt = new Map<string, number>();
+  #upsertedAt = new Map<string, number>();
+  #albumAssetsByMonth = new Map<TimelineMonth, Set<string>>();
+  /* eslint-enable svelte/prefer-svelte-reactivity */
+
+  get assetChangeRevision() {
+    return this.#assetChangeRevision;
+  }
+
+  wasRemovedAfter(id: string, revision: number) {
+    const removed = this.#removedAt.get(id) ?? 0;
+    return removed > revision && removed > (this.#upsertedAt.get(id) ?? 0);
+  }
+
+  wasUpsertedAfter(id: string, revision: number) {
+    return (this.#upsertedAt.get(id) ?? 0) > revision;
+  }
+
+  #recordUpserts(assets: TimelineAsset[]) {
+    const revision = ++this.#assetChangeRevision;
+    for (const asset of assets) {
+      if (!this.isExcluded(asset)) {
+        this.#upsertedAt.set(asset.id, revision);
+      }
+    }
+  }
+
+  setAlbumAssets(month: TimelineMonth, ids: string[]) {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    this.#albumAssetsByMonth.set(month, new Set(ids));
+    this.#rebuildAlbumAssets();
+  }
+
+  #rebuildAlbumAssets() {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const ids = new Set<string>();
+    for (const values of this.#albumAssetsByMonth.values()) {
+      for (const id of values) {
+        ids.add(id);
+      }
+    }
+    for (const id of this.albumAssets) {
+      if (!ids.has(id)) {
+        this.albumAssets.delete(id);
+      }
+    }
+    for (const id of ids) {
+      this.albumAssets.add(id);
+    }
+  }
 
   get showAssetOwners() {
     return userPreferencesManager.showAssetOwners;
@@ -121,6 +183,7 @@ export class TimelineManager extends VirtualScrollManager {
 
     this.#unsubscribes.push(
       eventManager.on({
+        WebsocketReconnect: () => this.refresh().catch(() => {}),
         AssetUpdate: (asset: AssetResponseDto) => {
           const timelineAsset = toTimelineAsset(asset);
           if (this.#options.albumId || this.#options.personId) {
@@ -304,6 +367,13 @@ export class TimelineManager extends VirtualScrollManager {
       ...this.#options,
     });
 
+    this.#replaceTimelineMonths(timebuckets);
+  }
+
+  #replaceTimelineMonths(timebuckets: TimeBucketsResponseDto[]) {
+    for (const month of this.months) {
+      month.cancel();
+    }
     this.months = timebuckets.map((timeBucket) => {
       const date = new SvelteDate(timeBucket.timeBucket);
       return new TimelineMonth(
@@ -316,7 +386,88 @@ export class TimelineManager extends VirtualScrollManager {
       );
     });
     this.albumAssets.clear();
+    this.#albumAssetsByMonth.clear();
     this.updateViewportGeometry(false);
+  }
+
+  // Reconnect cannot replay events missed while offline. Counts alone also
+  // miss a deletion balanced by an upload, so visible membership reloads.
+  async refresh() {
+    if (this.#destroyed || !this.isInitialized) {
+      return;
+    }
+    if (this.#refreshTask) {
+      this.#refreshAgain = true;
+      this.#refreshController?.abort();
+      for (const { controller } of this.#monthRefreshTasks.values()) {
+        controller.abort();
+      }
+      return this.#refreshTask;
+    }
+    const task = (async () => {
+      do {
+        this.#refreshAgain = false;
+        const generation = this.#generation;
+        const assetRevision = this.#assetChangeRevision;
+        const options = this.#options;
+        const controller = (this.#refreshController = new AbortController());
+        try {
+          const timebuckets = await getTimeBuckets(
+            { ...authManager.params, ...options },
+            { signal: controller.signal },
+          );
+          if (this.#destroyed || generation !== this.#generation || this.#refreshAgain) {
+            continue;
+          }
+          if (assetRevision !== this.#assetChangeRevision) {
+            // A live change may have created a month absent from this snapshot.
+            this.#refreshAgain = true;
+            continue;
+          }
+          // eslint-disable-next-line svelte/prefer-svelte-reactivity
+          const previous = new Map(this.months.map((month) => [month.viewId, month]));
+          this.#refreshRevision++;
+          this.months = timebuckets.map((bucket) => {
+            const date = new SvelteDate(bucket.timeBucket);
+            const yearMonth = { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+            const existing = previous.get(`${yearMonth.year}-${yearMonth.month}`);
+            if (existing) {
+              previous.delete(existing.viewId);
+              existing.updateInitialCount(bucket.count);
+              this.#staleMonths.add(existing);
+              return existing;
+            }
+            return new TimelineMonth(this, yearMonth, bucket.count, false, options.order, options.orderBy);
+          });
+          for (const month of previous.values()) {
+            month.cancel();
+            this.#staleMonths.delete(month);
+            this.#monthRefreshTasks.get(month)?.controller.abort();
+            this.#albumAssetsByMonth.delete(month);
+          }
+          this.#rebuildAlbumAssets();
+          this.updateViewportGeometry(false);
+          await Promise.all(
+            this.months
+              .filter((month) => month.isInOrNearViewport)
+              .map((month) => this.loadTimelineMonth(month.yearMonth)),
+          );
+          this.#createScrubberMonths();
+        } catch (error) {
+          if (!this.#refreshAgain && !this.#destroyed) {
+            throw error;
+          }
+        }
+      } while (this.#refreshAgain && !this.#destroyed && this.isInitialized);
+    })();
+    this.#refreshTask = task;
+    try {
+      await task;
+    } finally {
+      if (this.#refreshTask === task) {
+        this.#refreshTask = undefined;
+      }
+    }
   }
 
   async updateOptions(options: TimelineManagerOptions) {
@@ -339,6 +490,13 @@ export class TimelineManager extends VirtualScrollManager {
   }
 
   async #init(options: TimelineManagerOptions) {
+    this.#generation++;
+    this.#removedAt.clear();
+    this.#upsertedAt.clear();
+    this.#staleMonths.clear();
+    for (const { controller } of this.#monthRefreshTasks.values()) {
+      controller.abort();
+    }
     this.isInitialized = false;
     this.months = [];
     this.albumAssets.clear();
@@ -349,6 +507,12 @@ export class TimelineManager extends VirtualScrollManager {
   }
 
   public override destroy() {
+    this.#destroyed = true;
+    this.#generation++;
+    this.#refreshController?.abort();
+    for (const { controller } of this.#monthRefreshTasks.values()) {
+      controller.abort();
+    }
     this.disconnect();
     this.isInitialized = false;
 
@@ -409,26 +573,78 @@ export class TimelineManager extends VirtualScrollManager {
       return;
     }
 
-    if (timelineMonth.loader?.executed) {
+    const generation = this.#generation;
+    const revision = this.#refreshRevision;
+    const isCurrent = () =>
+      !this.#destroyed &&
+      generation === this.#generation &&
+      revision === this.#refreshRevision &&
+      this.months.includes(timelineMonth);
+    if (this.#staleMonths.has(timelineMonth)) {
+      const existing = this.#monthRefreshTasks.get(timelineMonth);
+      if (existing?.revision === revision) {
+        return existing.task;
+      }
+      existing?.controller.abort();
+      const controller = new AbortController();
+      const task = (async () => {
+        try {
+          await loadFromTimeBuckets(this, timelineMonth, this.#options, controller.signal, true, isCurrent);
+          if (!isCurrent() || controller.signal.aborted) {
+            return;
+          }
+          timelineMonth.isLoaded = true;
+          this.#staleMonths.delete(timelineMonth);
+          updateGeometry(this, timelineMonth, { invalidateHeight: false });
+          this.updateViewportProximities();
+        } catch {
+          // Retain loaded assets and geometry; a later refresh/scroll retries.
+        } finally {
+          if (this.#monthRefreshTasks.get(timelineMonth)?.controller === controller) {
+            this.#monthRefreshTasks.delete(timelineMonth);
+          }
+        }
+      })();
+      this.#monthRefreshTasks.set(timelineMonth, { revision, controller, task });
+      return task;
+    }
+
+    if (timelineMonth.isLoaded || timelineMonth.loader?.executed) {
       return;
     }
 
     const executionStatus = await timelineMonth.loader?.execute(async (signal: AbortSignal) => {
-      await loadFromTimeBuckets(this, timelineMonth, this.#options, signal);
+      try {
+        await loadFromTimeBuckets(this, timelineMonth, this.#options, signal, false, isCurrent);
+      } catch (error) {
+        if (isCurrent()) {
+          throw error;
+        }
+      }
     }, cancelable);
-    if (executionStatus === 'LOADED') {
+    if (
+      generation === this.#generation &&
+      this.months.includes(timelineMonth) &&
+      this.#staleMonths.has(timelineMonth)
+    ) {
+      // A reconnect invalidated this request while navigation was awaiting it.
+      return this.loadTimelineMonth(yearMonth, options);
+    }
+    if (executionStatus === 'LOADED' && isCurrent()) {
       updateGeometry(this, timelineMonth, { invalidateHeight: false });
       this.updateViewportProximities();
     }
   }
 
   upsertAssets(assets: TimelineAsset[]) {
+    this.#recordUpserts(assets);
     const notUpdated = this.#updateAssets(assets);
     const notExcluded = notUpdated.filter((asset) => !this.isExcluded(asset));
     this.addAssetsUpsertSegments([...notExcluded]);
   }
 
   upsertAssetsFromLiveEvent(assets: TimelineAsset[]) {
+    this.#recordUpserts(assets);
     const notUpdated = this.#updateAssets(assets);
     const insertable = notUpdated.filter((asset) => this.canInsertAssetFromLiveEvent(asset));
     this.addAssetsUpsertSegments(insertable);
@@ -521,6 +737,10 @@ export class TimelineManager extends VirtualScrollManager {
   }
 
   removeAssets(ids: string[]) {
+    const revision = ++this.#assetChangeRevision;
+    for (const id of ids) {
+      this.#removedAt.set(id, revision);
+    }
     // eslint-disable-next-line svelte/prefer-svelte-reactivity
     const result = this.#runAssetCallback(new Set(ids), () => ({ remove: true }));
     return [...result.notUpdated];

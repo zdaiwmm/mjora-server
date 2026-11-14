@@ -6,6 +6,33 @@ import { AssetVisibility } from '@immich/sdk';
 
 test.describe('timeline', () => {
   test.describe('/photos', () => {
+    test('socket reconnect removes photos deleted while events were unavailable', async ({ page, data, api, app }) => {
+      const [removed, retained] = data.addTimeline({ years: 1 });
+      await page.goto(Route.photos());
+      await expect(app.timeline.thumbnail(removed)).toBeVisible();
+      data.deleteAssets([removed.id], true);
+      await api.disconnectSocket();
+      await expect(app.timeline.thumbnail(removed)).toHaveCount(0);
+      await expect(app.timeline.thumbnail(retained)).toBeVisible();
+    });
+
+    test('upper-left back releases the viewer so a different photo can open repeatedly', async ({
+      page,
+      data,
+      app,
+    }) => {
+      const assets = data.addTimeline({ years: 1 });
+      await page.goto(Route.photos());
+      for (const asset of [assets[0], assets[1], assets[2], assets[0]]) {
+        await app.timeline.thumbnail(asset).click();
+        await app.viewer.waitForAsset(asset);
+        await app.viewer.backButton.click();
+        await page.waitForURL(/\/photos\?at=/);
+        await expect(app.viewer.root).toHaveCount(0);
+        await expect(app.timeline.thumbnail(asset)).toBeVisible();
+      }
+    });
+
     test('deep link to random assets and to the last asset', async ({ page, data, app }) => {
       const assets = data.addTimeline();
       for (const asset of [...data.sampleAssets(9), assets.at(-1)!]) {

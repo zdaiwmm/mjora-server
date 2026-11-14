@@ -223,8 +223,8 @@ const createTimeline = (page: Page, data: MockData) => {
     goToDate: async (asset: AssetResponseDto) => {
       await grid.hover();
       await page.keyboard.press('g');
-      const value = DateTime.fromISO(asset.fileCreatedAt, { zone: 'utc' }).toFormat('MMddyyyy,hh:mm:ss.SSSa');
-      await page.getByLabel('date_and_time', { exact: true }).pressSequentially(value);
+      const value = DateTime.fromISO(asset.fileCreatedAt, { zone: 'utc' }).toFormat("yyyy-MM-dd'T'HH:mm:ss");
+      await page.getByLabel('date_and_time', { exact: true }).fill(value);
       await page.getByRole('button', { name: 'confirm', exact: true }).click();
     },
 

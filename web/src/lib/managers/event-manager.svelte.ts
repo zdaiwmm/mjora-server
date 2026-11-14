@@ -93,6 +93,7 @@ export type Events = {
   ReleaseEvent: [ReleaseEventV1];
 
   WebsocketConnect: [];
+  WebsocketReconnect: [];
 };
 
 export const eventManager = new BaseEventManager<Events>();
