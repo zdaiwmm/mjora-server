@@ -14,12 +14,9 @@ export async function loadFromTimeBuckets(
   refresh = false,
   isCurrent = () => true,
 ): Promise<void> {
-  if (!refresh && timelineMonth.getFirstAsset()) {
-    return;
-  }
   const revision = timelineManager.assetChangeRevision;
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
-  const before = new Map(refresh ? $state.snapshot(timelineMonth.getAssets()).map((asset) => [asset.id, asset]) : []);
+  const before = new Map($state.snapshot(timelineMonth.getAssets()).map((asset) => [asset.id, asset]));
 
   const timeBucket = toISOYearMonthUTC(timelineMonth.yearMonth);
   const bucketResponse = await getTimeBucket(
@@ -50,7 +47,7 @@ export async function loadFromTimeBuckets(
     timelineManager.setAlbumAssets(timelineMonth, albumAssets.id);
   }
 
-  const current = refresh ? $state.snapshot(timelineMonth.getAssets()) : [];
+  const current = $state.snapshot(timelineMonth.getAssets());
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   const currentIds = new Set(current.map((asset) => asset.id));
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
@@ -62,7 +59,9 @@ export async function loadFromTimeBuckets(
     .map((_, index) => index)
     .filter(
       (index) =>
-        !removed.has(bucketResponse.id[index]) && !timelineManager.wasRemovedAfter(bucketResponse.id[index], revision),
+        !removed.has(bucketResponse.id[index]) &&
+        !timelineManager.wasRemovedAfter(bucketResponse.id[index], revision) &&
+        (refresh || !currentIds.has(bucketResponse.id[index])),
     );
   const response = (
     keep.length === bucketResponse.id.length
@@ -78,7 +77,7 @@ export async function loadFromTimeBuckets(
     timelineMonth.timelineDays = [];
   }
 
-  const unprocessedAssets = timelineMonth.addAssets(response, true);
+  const unprocessedAssets = timelineMonth.addAssets(response, false);
   if (newer.length > 0) {
     timelineManager.upsertAssets(newer);
   }

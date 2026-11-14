@@ -117,6 +117,7 @@ export class TimelineManager extends VirtualScrollManager {
   #assetChangeRevision = 0;
   #removedAt = new Map<string, number>();
   #upsertedAt = new Map<string, number>();
+  #assetVersions = new Map<string, number>();
   #albumAssetsByMonth = new Map<TimelineMonth, Set<string>>();
   /* eslint-enable svelte/prefer-svelte-reactivity */
 
@@ -136,8 +137,12 @@ export class TimelineManager extends VirtualScrollManager {
   #recordUpserts(assets: TimelineAsset[]) {
     const revision = ++this.#assetChangeRevision;
     for (const asset of assets) {
-      if (!this.isExcluded(asset)) {
-        this.#upsertedAt.set(asset.id, revision);
+      if (this.isExcluded(asset)) {
+        continue;
+      }
+      this.#upsertedAt.set(asset.id, revision);
+      if (asset.updatedAt) {
+        this.#assetVersions.set(asset.id, Date.parse(asset.updatedAt));
       }
     }
   }
@@ -186,11 +191,7 @@ export class TimelineManager extends VirtualScrollManager {
         WebsocketReconnect: () => this.refresh().catch(() => {}),
         AssetUpdate: (asset: AssetResponseDto) => {
           const timelineAsset = toTimelineAsset(asset);
-          if (this.#options.albumId || this.#options.personId) {
-            this.#updateAssets([timelineAsset]);
-          } else {
-            this.upsertAssets([timelineAsset]);
-          }
+          this.upsertAssetsFromLiveEvent([timelineAsset]);
         },
         AssetsArchive: (assetIds) => this.update(assetIds, (asset) => (asset.visibility = AssetVisibility.Archive)),
         AssetsUnarchive: (assets) => {
@@ -493,6 +494,7 @@ export class TimelineManager extends VirtualScrollManager {
     this.#generation++;
     this.#removedAt.clear();
     this.#upsertedAt.clear();
+    this.#assetVersions.clear();
     this.#staleMonths.clear();
     for (const { controller } of this.#monthRefreshTasks.values()) {
       controller.abort();
@@ -644,8 +646,27 @@ export class TimelineManager extends VirtualScrollManager {
   }
 
   upsertAssetsFromLiveEvent(assets: TimelineAsset[]) {
-    this.#recordUpserts(assets);
-    const notUpdated = this.#updateAssets(assets);
+    // A delete has no server version. Only an explicit restore/upsert may lift
+    // its tombstone; a delayed upload notification cannot recreate the photo.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const current = new Map<string, TimelineAsset>();
+    for (const asset of assets) {
+      const version = asset.updatedAt ? Date.parse(asset.updatedAt) : undefined;
+      const latest = this.#assetVersions.get(asset.id);
+      if (this.wasRemovedAfter(asset.id, 0) || (version !== undefined && latest !== undefined && version < latest)) {
+        continue;
+      }
+      if (version !== undefined) {
+        this.#assetVersions.set(asset.id, version);
+      }
+      current.set(asset.id, asset);
+    }
+    const accepted = [...current.values()];
+    if (accepted.length === 0) {
+      return;
+    }
+    this.#recordUpserts(accepted);
+    const notUpdated = this.#updateAssets(accepted);
     const insertable = notUpdated.filter((asset) => this.canInsertAssetFromLiveEvent(asset));
     this.addAssetsUpsertSegments(insertable);
   }
@@ -753,6 +774,8 @@ export class TimelineManager extends VirtualScrollManager {
     if (!month) {
       month = new TimelineMonth(this, dateTime, 1, true, this.#options.order, this.#options.orderBy);
       this.months.push(month);
+    } else if (!month.isLoaded) {
+      month.updateInitialCount(month.assetsCount + 1);
     }
     return month;
   }
@@ -804,7 +827,11 @@ export class TimelineManager extends VirtualScrollManager {
       if (notUpdated.size === 0) {
         break;
       }
+      const previousCount = month.isLoaded ? 0 : month.getAssets().length;
       const result = month.runAssetCallback(notUpdated, callback);
+      if (!month.isLoaded && result.changedGeometry) {
+        month.updateInitialCount(month.assetsCount + month.getAssets().length - previousCount);
+      }
       if (result.moveAssets.length > 0) {
         assetsToMoveSegments.push(result.moveAssets);
       }
@@ -829,6 +856,7 @@ export class TimelineManager extends VirtualScrollManager {
     }
     if (changedGeometry) {
       this.updateViewportProximities();
+      this.#createScrubberMonths();
     }
     return { updated, notUpdated, changedGeometry };
   }
@@ -934,5 +962,6 @@ export class TimelineManager extends VirtualScrollManager {
       updateGeometry(this, month, { invalidateHeight: true });
     }
     this.updateViewportProximities();
+    this.#createScrubberMonths();
   }
 }

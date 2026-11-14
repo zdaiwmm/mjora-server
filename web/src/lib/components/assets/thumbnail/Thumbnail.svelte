@@ -23,6 +23,7 @@
     mdiRotate360,
   } from '@mdi/js';
   import { onMount } from 'svelte';
+  import { t } from 'svelte-i18n';
   import type { ClassValue } from 'svelte/elements';
   import { fade } from 'svelte/transition';
   import ImageThumbnail from './ImageThumbnail.svelte';
@@ -77,6 +78,7 @@
   let mouseOver = $state(false);
   let loaded = $state(false);
   let thumbError = $state(false);
+  let thumbnailRevision = $state(0);
   let skipFade = $state(false);
 
   let width = $derived(thumbnailSize || thumbnailWidth || 235);
@@ -238,21 +240,27 @@
 >
   <div class="group absolute inset-y-0" style:width="inherit" style:height="inherit">
     <div class={['absolute size-full bg-transparent transition-transform select-none', { 'scale-[0.85]': selected }]}>
-      <ImageThumbnail
-        class={['absolute group-focus-visible:rounded-lg', imageClass]}
-        brokenAssetClass={['z-1 absolute group-focus-visible:rounded-lg', brokenAssetClass]}
-        url={getAssetMediaUrl({ id: asset.id, size: AssetMediaSize.Thumbnail, cacheKey: asset.thumbhash })}
-        altText={$getAltText(asset)}
-        widthStyle="{width}px"
-        heightStyle="{height}px"
-        curve={selected}
-        onComplete={(errored) => {
-          const rect = element?.getBoundingClientRect();
-          skipFade = !rect || rect.bottom < 0 || rect.top > window.innerHeight;
-          loaded = true;
-          thumbError = errored;
-        }}
-      />
+      {#key thumbnailRevision}
+        <ImageThumbnail
+          class={['absolute group-focus-visible:rounded-lg', imageClass]}
+          brokenAssetClass={['z-1 absolute group-focus-visible:rounded-lg', brokenAssetClass]}
+          url={getAssetMediaUrl({
+            id: asset.id,
+            size: AssetMediaSize.Thumbnail,
+            cacheKey: thumbnailRevision ? `${asset.thumbhash ?? ''}:${thumbnailRevision}` : asset.thumbhash,
+          })}
+          altText={$getAltText(asset)}
+          widthStyle="{width}px"
+          heightStyle="{height}px"
+          curve={selected}
+          onComplete={(errored) => {
+            const rect = element?.getBoundingClientRect();
+            skipFade = !rect || rect.bottom < 0 || rect.top > window.innerHeight;
+            loaded = true;
+            thumbError = errored;
+          }}
+        />
+      {/key}
       {#if asset.isVideo}
         <div class="pointer-events-none absolute size-full group-focus-visible:rounded-lg">
           <VideoThumbnail
@@ -304,6 +312,23 @@
           draggable="false"
           fadeOut
         />
+      {/if}
+
+      {#if thumbError}
+        <button
+          type="button"
+          class="absolute inset-x-2 bottom-2 z-3 rounded-sm bg-immich-bg px-2 py-1 text-sm text-immich-fg shadow-sm focus-visible:outline-2 focus-visible:outline-immich-primary dark:bg-immich-dark-bg dark:text-immich-dark-fg"
+          onkeydown={(event) => event.stopPropagation()}
+          onclick={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            thumbError = false;
+            loaded = false;
+            thumbnailRevision = Math.max(Date.now(), thumbnailRevision + 1);
+          }}
+        >
+          {$t('retry')}
+        </button>
       {/if}
 
       <!-- icon overlay -->

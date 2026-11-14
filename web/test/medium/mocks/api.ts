@@ -9,6 +9,7 @@ const mapStylePattern = /^https:\/\/tiles\.immich\.cloud\//;
 const emptyMapStyle = { version: 8, sources: {}, layers: [] };
 
 const sockets = new WeakMap<BrowserContext, WebSocketRoute>();
+const socketBarriers = new WeakMap<BrowserContext, () => void>();
 const socketMockedContexts = new WeakSet<BrowserContext>();
 
 const mockWebSocket = async (context: BrowserContext) => {
@@ -20,7 +21,10 @@ const mockWebSocket = async (context: BrowserContext) => {
     sockets.set(context, socket);
     socket.send('0{"sid":"mock","upgrades":[],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}');
     socket.onMessage((message) => {
-      if (message === '2') {
+      if (message === '3') {
+        socketBarriers.get(context)?.();
+        socketBarriers.delete(context);
+      } else if (message === '2') {
         socket.send('3');
       } else if (typeof message === 'string' && message.startsWith('40')) {
         socket.send('40{"sid":"mock"}');
@@ -83,6 +87,13 @@ export class MockNetwork extends Dispatcher {
       throw new Error('No websocket connection has been established by the page');
     }
     socket.send(`42${JSON.stringify(payload === undefined ? [event] : [event, payload])}`);
+  }
+
+  async emitAndWait(event: string, payload?: unknown) {
+    const barrier = new Promise<void>((resolve) => socketBarriers.set(this.context, resolve));
+    this.emit(event, payload);
+    sockets.get(this.context)!.send('2');
+    await barrier;
   }
 
   async disconnectSocket() {
