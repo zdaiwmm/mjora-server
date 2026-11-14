@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "release-1.0.1-2",
+  "version": "1.0.1",
+  "build": "2",
+  "notes": "A privately prepared update is available.",
+  "appPath": "/Users/YOU/Library/Application Support/ConfirmedUpdate/releases/1.0.1-2/Prepared.app",
+  "appSHA256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sourceRevision": "0000000000000000000000000000000000000000",
+  "sourceRoot": "/Users/YOU/Library/Application Support/ConfirmedUpdate/releases/1.0.1-2/source",
+  "sourceSHA256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "enrollmentSHA256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "targetIdentitySHA256": "0000000000000000000000000000000000000000000000000000000000000000"
+}

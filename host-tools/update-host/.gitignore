@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+config.json
+release.json
+update-token
+state/
+tls/
+releases/
+*.key
+*.pem
+*.crt
+*.ipa

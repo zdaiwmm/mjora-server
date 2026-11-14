@@ -12,6 +12,7 @@ mjora 的服务端开发仓库，由 [Immich](https://github.com/immich-app/immi
 - `docker/`、`deployment/`：上游部署文件。
 - [deploy/lan-gateway/](deploy/lan-gateway/README.md)：mjora 的可选局域网 HTTPS API 入口模板及证书信任说明。
 - [deploy/web/](deploy/web/README.md)：在固定服务端版本上更新 Web 静态资源的候选镜像配方。
+- [host-tools/update-host/](host-tools/update-host/README.md)：运行于配对 Mac 的 HTTPS 更新服务；App 确认后才安装固定签名包，与 Ubuntu 照片服务分开。
 
 `mjora` 分支移除了手机端的 `mobile/`、`native/`、`fastlane/`，以及继承的自动构建发布任务。仓库保留服务端镜像需要的构建依赖。实际家庭配置、账号、照片、证书及私钥保存在部署环境中。
 

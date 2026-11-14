@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "hostId": "example-private-update-host",
+  "listenHost": "0.0.0.0",
+  "listenPort": 9443,
+  "certificatePath": "/Users/YOU/Library/Application Support/ConfirmedUpdate/tls/server.pem",
+  "privateKeyPath": "/Users/YOU/Library/Application Support/ConfirmedUpdate/tls/server.key",
+  "accessTokenPath": "/Users/YOU/Library/Application Support/ConfirmedUpdate/update-token",
+  "manifestPath": "/Users/YOU/Library/Application Support/ConfirmedUpdate/release.json",
+  "stateDir": "/Users/YOU/Library/Application Support/ConfirmedUpdate/state",
+  "renewalConfigPath": "/Users/YOU/Library/Application Support/NativeRenewal/config.json",
+  "teamId": "YOURTEAMID",
+  "deviceUDID": "YOUR-EXISTING-PAIRED-DEVICE",
+  "mainBundleId": "invalid.example.app",
+  "shareBundleId": "invalid.example.app.share",
+  "appGroup": "group.invalid.example.app",
+  "approvedEnrollmentSHA256": "0000000000000000000000000000000000000000000000000000000000000000"
+}
