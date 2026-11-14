@@ -18,6 +18,7 @@ export type Direction = 'earlier' | 'later';
 export type TimelineAsset = {
   id: string;
   ownerId: string;
+  updatedAt?: string;
   tags?: string[];
   ratio: number;
   thumbhash: string | null;

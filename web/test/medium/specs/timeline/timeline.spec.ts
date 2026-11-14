@@ -6,6 +6,179 @@ import { AssetVisibility } from '@immich/sdk';
 
 test.describe('timeline', () => {
   test.describe('/photos', () => {
+    test('live uploads open repeatedly across existing days, new days and new months', async ({
+      page,
+      data,
+      api,
+      app,
+    }) => {
+      const old = factory.asset({ fileCreatedAt: '2025-06-10T12:00:00.000Z' });
+      data.addAssets(old);
+      await page.goto(Route.photos());
+      await expect(app.timeline.thumbnail(old)).toBeVisible();
+      const uploads = [
+        factory.asset({ fileCreatedAt: '2025-06-10T13:00:00.000Z' }),
+        factory.asset({ fileCreatedAt: '2025-06-11T13:00:00.000Z' }),
+        factory.asset({ fileCreatedAt: '2025-07-01T13:00:00.000Z' }),
+      ];
+      for (const asset of uploads) {
+        data.addAssets(asset);
+        api.emit('on_upload_success', asset);
+        await expect(app.timeline.thumbnail(asset)).toBeVisible();
+        await expect(app.timeline.scrubber(yearMonthOf(asset))).toBeVisible();
+        await api.emitAndWait('on_upload_success', asset);
+        await api.emitAndWait('on_upload_success', asset);
+        for (const target of [asset, old, asset]) {
+          await app.timeline.thumbnail(target).click();
+          await app.viewer.waitForAsset(target);
+          await expect(page).toHaveURL(Route.viewAsset({ id: target.id }));
+          await app.viewer.backButton.click();
+          await page.waitForURL(/\/photos\?at=/);
+          await expect(app.viewer.root).toHaveCount(0);
+        }
+      }
+    });
+
+    test('live upload during a bucket request remains a single clickable photo', async ({
+      page,
+      data,
+      api,
+      app,
+      logger,
+    }, testInfo) => {
+      const old = factory.asset({ fileCreatedAt: '2025-06-10T12:00:00.000Z' });
+      const uploaded = factory.asset({ fileCreatedAt: '2025-06-10T13:00:00.000Z' });
+      data.addAssets(old);
+      let release!: () => void;
+      api.on({
+        getTimeBucket: async ({ params }) => {
+          await new Promise<void>((resolve) => (release = resolve));
+          return { json: data.timeBucket(params.timeBucket, params) };
+        },
+      });
+      await page.goto(Route.photos());
+      await expect.poll(() => typeof release).toBe('function');
+      data.addAssets(uploaded);
+      await api.emitAndWait('on_upload_success', uploaded);
+      release();
+      try {
+        await expect(app.timeline.thumbnail(uploaded)).toHaveCount(1);
+      } finally {
+        await testInfo.attach('live-upload-boundaries', {
+          contentType: 'application/json',
+          body: JSON.stringify({
+            errors: logger.error.calls,
+            route: page.url(),
+            rendered: await app.timeline.thumbnails.evaluateAll((elements) =>
+              elements.map((element) => element.dataset.asset),
+            ),
+            details: api.getAssetInfo.calls,
+          }),
+        });
+      }
+      const opens = [];
+      for (const asset of [uploaded, old, uploaded]) {
+        await app.timeline.thumbnail(asset).hover();
+        const hit = await app.timeline.thumbnail(asset).evaluate((element) => {
+          const { left, top, width, height } = element.getBoundingClientRect();
+          const target = document.elementFromPoint(left + width / 2, top + height / 2);
+          return {
+            tag: target?.tagName,
+            id: target?.closest<HTMLElement>('[data-thumbnail-focus-container]')?.dataset.asset,
+          };
+        });
+        expect(hit.id).toBe(asset.id);
+        const detail =
+          opens.length === 0
+            ? page.waitForResponse((response) => new URL(response.url()).pathname === `/api/assets/${asset.id}`)
+            : undefined;
+        await app.timeline.thumbnail(asset).click();
+        await app.viewer.waitForAsset(asset);
+        await expect(page).toHaveURL(Route.viewAsset({ id: asset.id }));
+        const detailResponse = detail ? await detail : undefined;
+        const detailStatus = detailResponse?.status();
+        if (detail) {
+          expect(detailStatus).toBe(200);
+        }
+        opens.push({
+          id: asset.id,
+          hit,
+          route: page.url(),
+          detailStatus,
+          viewerOpen: await app.viewer.root.isVisible(),
+        });
+        await app.viewer.backButton.click();
+        await page.waitForURL(/\/photos\?at=/);
+        await expect(app.viewer.root).toHaveCount(0);
+      }
+      await testInfo.attach('live-upload-clicks-and-viewer', {
+        contentType: 'application/json',
+        body: JSON.stringify(opens),
+      });
+    });
+
+    test('live upload deleted immediately cannot return through a delayed upload replay', async ({
+      page,
+      data,
+      api,
+      app,
+    }) => {
+      const old = factory.asset({ fileCreatedAt: '2025-06-10T12:00:00.000Z' });
+      const uploaded = factory.asset({ fileCreatedAt: '2025-06-11T13:00:00.000Z' });
+      const sentinel = factory.asset({ fileCreatedAt: uploaded.fileCreatedAt });
+      data.addAssets(old);
+      await page.goto(Route.photos());
+      await expect(app.timeline.thumbnail(old)).toBeVisible();
+      data.addAssets(uploaded);
+      await api.emitAndWait('on_upload_success', uploaded);
+      await expect(app.timeline.thumbnail(uploaded)).toBeVisible();
+      data.deleteAssets([uploaded.id], true);
+      await api.emitAndWait('on_asset_delete', uploaded.id);
+      await expect(app.timeline.thumbnail(uploaded)).toHaveCount(0);
+      await api.emitAndWait('on_upload_success', uploaded);
+      data.addAssets(sentinel);
+      await api.emitAndWait('on_upload_success', sentinel);
+      await expect(app.timeline.thumbnail(sentinel)).toBeVisible();
+      await expect(app.timeline.thumbnail(uploaded)).toHaveCount(0);
+      for (const asset of [sentinel, old, sentinel]) {
+        await app.timeline.thumbnail(asset).click();
+        await app.viewer.waitForAsset(asset);
+        await app.viewer.backButton.click();
+        await page.waitForURL(/\/photos\?at=/);
+        await expect(app.viewer.root).toHaveCount(0);
+      }
+    });
+
+    test('live upload into an unloaded month keeps its old members after scrolling away and back', async ({
+      page,
+      data,
+      api,
+      app,
+    }) => {
+      const assets = data.addTimeline({ years: 2 });
+      const first = assets[0];
+      const lastMonth = yearMonthOf(assets.at(-1)!);
+      const old = assets.find((asset) => yearMonthOf(asset) === lastMonth)!;
+      const uploaded = factory.asset({ fileCreatedAt: old.fileCreatedAt });
+      await page.goto(Route.photos());
+      await expect(app.timeline.thumbnail(first)).toBeVisible();
+      data.addAssets(uploaded);
+      await api.emitAndWait('on_upload_success', uploaded);
+      for (let index = 0; index < 2; index++) {
+        await app.timeline.goToDate(uploaded);
+        for (const asset of [uploaded, old, uploaded]) {
+          await app.timeline.thumbnail(asset).click();
+          await app.viewer.waitForAsset(asset);
+          await app.viewer.backButton.click();
+          await page.waitForURL(/\/photos\?at=/);
+          await expect(app.viewer.root).toHaveCount(0);
+        }
+        await app.timeline.goToDate(first);
+        await expect(app.timeline.thumbnail(first)).toBeInViewport();
+        await expect(app.timeline.thumbnail(uploaded)).not.toBeInViewport();
+      }
+    });
+
     test('socket reconnect removes photos deleted while events were unavailable', async ({ page, data, api, app }) => {
       const [removed, retained] = data.addTimeline({ years: 1 });
       await page.goto(Route.photos());

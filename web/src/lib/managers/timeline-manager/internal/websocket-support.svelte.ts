@@ -42,6 +42,8 @@ export class WebsocketSupport {
   }
 
   disconnectWebsocketEvents() {
+    this.#processPendingChanges.cancel();
+    this.#pendingChanges = [];
     for (const unsubscribe of this.#unsubscribers) {
       unsubscribe();
     }
