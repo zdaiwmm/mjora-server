@@ -137,6 +137,7 @@ const ServerConfigSchema = z
 
 const ServerFeaturesSchema = z
   .object({
+    photoEditsV1: z.boolean().describe('Whether whole-intent photo editor v1 color and geometry actions are supported'),
     smartSearch: z.boolean().describe('Whether smart search is enabled'),
     duplicateDetection: z.boolean().describe('Whether duplicate detection is enabled'),
     configFile: z.boolean().describe('Whether config file is available'),

@@ -5,6 +5,7 @@ export enum AssetEditAction {
   Crop = 'crop',
   Rotate = 'rotate',
   Mirror = 'mirror',
+  Photo = 'photo',
 }
 
 export const AssetEditActionSchema = z
@@ -47,23 +48,48 @@ const MirrorParametersSchema = z
   })
   .meta({ id: 'MirrorParameters' });
 
+const amount = () => z.number().min(-100).max(100).default(0).meta({ format: 'double' });
+
+export const PhotoParametersSchema = z
+  .object({
+    version: z.literal(1).meta({ type: 'integer' }),
+    exposure: amount(),
+    contrast: amount(),
+    saturation: amount(),
+    invert: z.boolean().default(false),
+    highlights: amount(),
+    shadows: amount(),
+    brightness: amount(),
+    blackPoint: amount(),
+    warmth: amount(),
+    tint: amount(),
+    straighten: z.number().min(-45).max(45).default(0).meta({ format: 'double' }),
+    horizontalPerspective: z.number().min(-1).max(1).default(0).meta({ format: 'double' }),
+    verticalPerspective: z.number().min(-1).max(1).default(0).meta({ format: 'double' }),
+  })
+  .meta({ id: 'PhotoParameters' });
+
+export type PhotoParameters = z.infer<typeof PhotoParametersSchema>;
+
 // TODO: ideally we would use the discriminated union directly in the future not only for type support but also for validation and openapi generation
 const __AssetEditActionItemSchema = z.discriminatedUnion('action', [
   z.object({ action: AssetEditActionSchema.extract(['Crop']), parameters: CropParametersSchema }),
   z.object({ action: AssetEditActionSchema.extract(['Rotate']), parameters: RotateParametersSchema }),
   z.object({ action: AssetEditActionSchema.extract(['Mirror']), parameters: MirrorParametersSchema }),
+  z.object({ action: AssetEditActionSchema.extract(['Photo']), parameters: PhotoParametersSchema }),
 ]);
 
 const AssetEditParametersSchema = z
-  .union([CropParametersSchema, RotateParametersSchema, MirrorParametersSchema], {
+  .union([CropParametersSchema, RotateParametersSchema, MirrorParametersSchema, PhotoParametersSchema], {
     error: getExpectedKeysByActionMessage,
   })
-  .describe('List of edit actions to apply (crop, rotate, or mirror)');
+  .describe('List of edit actions to apply (crop, rotate, mirror, or photo)');
 
 const actionParameterMap = {
   [AssetEditAction.Crop]: CropParametersSchema,
   [AssetEditAction.Rotate]: RotateParametersSchema,
   [AssetEditAction.Mirror]: MirrorParametersSchema,
+  [AssetEditAction.Photo]: PhotoParametersSchema,
 } as const;
 
 function getExpectedKeysByActionMessage(): string {
@@ -114,8 +140,12 @@ const AssetEditsCreateSchema = z
     edits: z
       .array(AssetEditActionItemSchema)
       .min(1)
-      .describe('List of edit actions to apply (crop, rotate, or mirror)')
-      .refine(uniqueEditActions, { error: 'Duplicate edit actions are not allowed' }),
+      .describe('List of edit actions to apply (crop, rotate, mirror, or photo)')
+      .refine(uniqueEditActions, { error: 'Duplicate edit actions are not allowed' })
+      .refine(
+        (edits) => edits.every((edit, index) => edit.action !== AssetEditAction.Photo || index === edits.length - 1),
+        { error: 'Photo action must be the last edit action' },
+      ),
   })
   .meta({ id: 'AssetEditsCreateDto' });
 

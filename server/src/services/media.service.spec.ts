@@ -2,7 +2,7 @@ import { ShallowDehydrateObject } from 'kysely';
 import { OutputInfo } from 'sharp';
 import { Exif } from 'src/database.js';
 import { SystemConfig } from 'src/dtos/config.dto.js';
-import { AssetEditAction } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, PhotoParametersSchema } from 'src/dtos/editing.dto.js';
 import {
   AssetFileType,
   AssetPathType,
@@ -1421,6 +1421,24 @@ describe(MediaService.name, () => {
         ),
       );
       mocks.media.getImageMetadata.mockResolvedValue({ width: 100, height: 100, isTransparent: false });
+    });
+
+    it('decodes enhanced edited derivatives into nonlinear sRGB while retaining original metadata', async () => {
+      rawInfo = { width: 101, height: 99, channels: 3 };
+      const asset = AssetFactory.from()
+        .exif({ colorspace: 'Adobe RGB', exifImageWidth: 101, exifImageHeight: 99 })
+        .edit({ action: AssetEditAction.Photo, parameters: PhotoParametersSchema.parse({ version: 1, exposure: 20 }) })
+        .build();
+      mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
+      mocks.media.generateThumbhash.mockResolvedValue(Buffer.from('thumbhash'));
+      await sut.handleAssetEditThumbnailGeneration({ id: asset.id });
+      expect(mocks.media.decodeImage).toHaveBeenCalledWith(
+        asset.originalPath,
+        expect.objectContaining({ colorspace: Colorspace.Srgb }),
+      );
+      expect(mocks.asset.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: asset.id, width: 101, height: 99 }),
+      );
     });
 
     it('should skip videos', async () => {

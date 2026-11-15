@@ -38,6 +38,7 @@ import type {
   VideoPacketInfo,
 } from 'src/types.js';
 import { handlePromiseError } from 'src/utils/misc.js';
+import { applyPhotoEdits } from 'src/utils/photo-edit.js';
 import { createAffineMatrix } from 'src/utils/transform.js';
 
 const probe = (input: string, options: string[]): Promise<FfprobeData> =>
@@ -166,7 +167,7 @@ export class MediaRepository {
       });
     }
 
-    const affineEditOperations = edits.filter((edit) => edit.action !== 'crop');
+    const affineEditOperations = edits.filter((edit) => edit.action === 'rotate' || edit.action === 'mirror');
     if (affineEditOperations.length > 0) {
       const { a, b, c, d } = createAffineMatrix(affineEditOperations);
       pipeline = pipeline.affine([
@@ -217,6 +218,10 @@ export class MediaRepository {
   /* Resamples in linear light; averaging gamma-encoded values darkens the result and loses detail. `colorspace`
    * always has a sRGB transfer function and scRGB applies no primaries matrix, so linearising as sRGB is exact. */
   private transform(image: Bitmap, { size, fit = 'outside', edits = [] }: TransformOptions): Promise<Bitmap> {
+    if (edits.some((edit) => edit.action === 'photo')) {
+      image = applyPhotoEdits(image, edits);
+      edits = [];
+    }
     if (!size && edits.length === 0) {
       return Promise.resolve(image);
     }

@@ -1,5 +1,5 @@
 import { Kysely } from 'kysely';
-import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, AssetEditActionItem, MirrorAxis } from 'src/dtos/editing.dto.js';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository.js';
 import { LoggingRepository } from 'src/repositories/logging.repository.js';
 import { DB } from 'src/schema/index.js';
@@ -25,6 +25,19 @@ beforeAll(async () => {
 
 describe(AssetEditRepository.name, () => {
   describe('replaceAll', () => {
+    it('rolls back the full replacement if inserting the new list fails', async () => {
+      const { ctx, sut } = setup();
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      const prior = await sut.replaceAll(asset.id, [{ action: AssetEditAction.Rotate, parameters: { angle: 90 } }]);
+      await expect(
+        sut.replaceAll(asset.id, [
+          { action: AssetEditAction.Photo, parameters: null },
+        ] as unknown as AssetEditActionItem[]),
+      ).rejects.toThrow();
+      await expect(sut.getAll(asset.id)).resolves.toEqual(prior);
+    });
+
     it('should set isEdited on insert', async () => {
       const { ctx, sut } = setup();
       const { user } = await ctx.newUser();

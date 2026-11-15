@@ -577,6 +577,9 @@ export class AssetService extends BaseService {
     }
 
     const edits = dto.edits as AssetEditActionItem[];
+    if (edits.some((edit, index) => edit.action === AssetEditAction.Photo && index !== edits.length - 1)) {
+      throw new BadRequestException('Photo action must be the last edit action');
+    }
     const crop = edits.find((e) => e.action === AssetEditAction.Crop);
     if (crop) {
       if (edits[0].action !== AssetEditAction.Crop) {

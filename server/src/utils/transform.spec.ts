@@ -318,3 +318,38 @@ describe('transformOcrBoundingBox', () => {
     });
   });
 });
+
+describe('photo warp metadata coordinates', () => {
+  it('maps all four face corners, including the off-diagonal extrema after straighten', () => {
+    const edits = [{ action: 'photo', parameters: { version: 1, straighten: 45 } }] as unknown as AssetEditActionItem[];
+    const face = {
+      boundingBoxX1: 40,
+      boundingBoxY1: 40,
+      boundingBoxX2: 60,
+      boundingBoxY2: 60,
+      imageWidth: 100,
+      imageHeight: 100,
+    };
+    const transformed = transformFaceBoundingBox(face, edits, { width: 100, height: 100 });
+    expect(transformed).toMatchObject({
+      boundingBoxX1: 30,
+      boundingBoxY1: 30,
+      boundingBoxX2: 70,
+      boundingBoxY2: 70,
+      imageWidth: 100,
+      imageHeight: 100,
+    });
+  });
+});
+
+it('keeps offscreen metadata finite at extreme perspective projective poles', () => {
+  const edits = [
+    { action: 'photo', parameters: { version: 1, horizontalPerspective: 1, verticalPerspective: 1 } },
+  ] as unknown as AssetEditActionItem[];
+  const result = transformFaceBoundingBox(
+    { boundingBoxX1: 90, boundingBoxY1: 90, boundingBoxX2: 100, boundingBoxY2: 100, imageWidth: 100, imageHeight: 100 },
+    edits,
+    { width: 100, height: 100 },
+  );
+  expect(Object.values(result).every((value) => Number.isFinite(value))).toBe(true);
+});

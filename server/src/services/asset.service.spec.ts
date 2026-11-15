@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { DateTime } from 'luxon';
 import { AssetJobName, AssetStatsResponseDto } from 'src/dtos/asset.dto.js';
-import { AssetEditAction } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, AssetEditsCreateDto } from 'src/dtos/editing.dto.js';
 import {
   AssetFileType,
   AssetMetadataKey,
@@ -797,6 +797,40 @@ describe(AssetService.name, () => {
   });
 
   describe('editAsset', () => {
+    it('requires photo last even for direct service callers', async () => {
+      const asset = AssetFactory.from().exif({ exifImageWidth: 100, exifImageHeight: 100 }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getForEdit.mockResolvedValue({ ...asset, ...asset.exifInfo });
+      await expect(
+        sut.editAsset(authStub.admin, asset.id, {
+          edits: [
+            AssetEditsCreateDto.schema.parse({ edits: [{ action: 'photo', parameters: { version: 1 } }] }).edits[0],
+            { action: AssetEditAction.Rotate, parameters: { angle: 90 } },
+          ],
+        }),
+      ).rejects.toThrow('Photo action must be the last edit action');
+      expect(mocks.assetEdit.replaceAll).not.toHaveBeenCalled();
+    });
+
+    it('does not read private edit intent when access is denied', async () => {
+      await expect(sut.getAssetEdits(authStub.admin, 'private')).rejects.toBeInstanceOf(BadRequestException);
+      expect(mocks.assetEdit.getAll).not.toHaveBeenCalled();
+    });
+
+    it('returns complete accepted photo intent', async () => {
+      const asset = AssetFactory.from().exif({ exifImageWidth: 100, exifImageHeight: 100 }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getForEdit.mockResolvedValue({ ...asset, ...asset.exifInfo });
+      const dto = AssetEditsCreateDto.schema.parse({
+        edits: [{ action: 'photo', parameters: { version: 1, exposure: 0.125, horizontalPerspective: -0.5 } }],
+      });
+      mocks.assetEdit.replaceAll.mockResolvedValue([{ id: 'edit', ...dto.edits[0] }]);
+      await expect(sut.editAsset(authStub.admin, asset.id, dto)).resolves.toEqual({
+        assetId: asset.id,
+        edits: [{ id: 'edit', ...dto.edits[0] }],
+      });
+    });
+
     it('should enforce crop first', async () => {
       await expect(
         sut.editAsset(authStub.admin, 'asset-1', {

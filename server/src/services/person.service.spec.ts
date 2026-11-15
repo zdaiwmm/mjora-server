@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto.js';
+import { AssetEditAction, PhotoParametersSchema } from 'src/dtos/editing.dto.js';
 import { PeopleUsersUpsertType, PersonUserRole, mapFaces, mapPerson } from 'src/dtos/person.dto.js';
 import { AssetFileType, CacheControl, JobName, JobStatus, SourceType, SystemMetadataKey } from 'src/enum.js';
 import { PersonService } from 'src/services/person.service.js';
@@ -599,6 +600,37 @@ describe(PersonService.name, () => {
   });
 
   describe('createFace', () => {
+    it('inverts every corner of a face selected on a straightened image', async () => {
+      const auth = AuthFactory.create();
+      const asset = AssetFactory.from({ width: 100, height: 100 })
+        .exif({ exifImageWidth: 100, exifImageHeight: 100 })
+        .edit({
+          action: AssetEditAction.Photo,
+          parameters: PhotoParametersSchema.parse({ version: 1, straighten: 45 }),
+        })
+        .build();
+      const person = PersonFactory.create({ faceAssetId: newUuid() });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.access.person.checkAccess.mockResolvedValue(
+        new Set([{ personGroupId: person.personGroupId, ownerId: auth.user.id }]),
+      );
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.person.getByGroupId.mockResolvedValue(person);
+      await sut.createFace(auth, {
+        assetId: asset.id,
+        personId: person.personGroupId,
+        imageWidth: 100,
+        imageHeight: 100,
+        x: 30,
+        y: 30,
+        width: 40,
+        height: 40,
+      });
+      expect(mocks.person.createAssetFace).toHaveBeenCalledWith(
+        expect.objectContaining({ boundingBoxX1: 30, boundingBoxY1: 30, boundingBoxX2: 70, boundingBoxY2: 70 }),
+      );
+    });
+
     it('should create a manual face and initialize the person feature photo creation', async () => {
       const auth = AuthFactory.create();
       const asset = AssetFactory.create();

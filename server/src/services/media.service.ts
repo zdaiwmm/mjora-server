@@ -239,9 +239,14 @@ export class MediaService extends BaseService {
     return extracted;
   }
 
-  private async decodeImage(thumbSource: string | Buffer, exifInfo: ThumbnailAsset['exifInfo'], targetSize?: number) {
+  private async decodeImage(
+    thumbSource: string | Buffer,
+    exifInfo: ThumbnailAsset['exifInfo'],
+    targetSize?: number,
+    photoEdits = false,
+  ) {
     const { image } = await this.getConfig({ withCache: true });
-    const colorspace = this.isSRGB(exifInfo) ? Colorspace.Srgb : image.colorspace;
+    const colorspace = photoEdits || this.isSRGB(exifInfo) ? Colorspace.Srgb : image.colorspace;
     const decodeOptions: DecodeToBufferOptions = {
       colorspace,
       processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
@@ -270,6 +275,7 @@ export class MediaService extends BaseService {
       // or it can double rotate the image
       extracted ? asset.exifInfo : { ...asset.exifInfo, orientation: null },
       isConvertFullsize ? undefined : image.preview.size,
+      useEdits && asset.edits.some((edit) => edit.action === AssetEditAction.Photo),
     );
 
     let isTransparent = false;
@@ -852,11 +858,13 @@ export class MediaService extends BaseService {
     const assetFaces = await this.personRepository.getFaces(asset.id, { viewingUserId: asset.ownerId });
     const ocrData = await this.ocrRepository.getByAssetId(asset.id, {});
 
-    const faceStatuses = checkFaceVisibility(assetFaces, originalDimensions, cropBox);
+    const faceStatuses = checkFaceVisibility(assetFaces, originalDimensions, cropBox, asset.edits);
     await this.personRepository.updateVisibility(faceStatuses.visible, faceStatuses.hidden);
 
-    const ocrStatuses = checkOcrVisibility(ocrData, originalDimensions, cropBox);
-    const searchText = (cropBox ? ocrStatuses.visible : ocrData)
+    const ocrStatuses = checkOcrVisibility(ocrData, originalDimensions, cropBox, asset.edits);
+    const searchText = (
+      cropBox || asset.edits.some((edit) => edit.action === AssetEditAction.Photo) ? ocrStatuses.visible : ocrData
+    )
       .flatMap(({ text }) => tokenizeForSearch(text))
       .join(' ');
     await this.ocrRepository.updateOcrVisibilities(asset.id, ocrStatuses.visible, ocrStatuses.hidden, searchText);

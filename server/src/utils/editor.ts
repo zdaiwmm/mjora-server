@@ -1,6 +1,8 @@
 import { AssetFace } from 'src/database.js';
+import { AssetEditActionItem } from 'src/dtos/editing.dto.js';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto.js';
 import type { ImageDimensions } from 'src/types.js';
+import { Point, getOutputDimensions, transformPoints } from 'src/utils/transform.js';
 
 type BoundingBox = {
   x1: number;
@@ -20,6 +22,59 @@ export const boundingBoxOverlap = (boxA: BoundingBox, boxB: BoundingBox) => {
   return overlapArea / faceArea;
 };
 
+const visibleFootprint = (edits: AssetEditActionItem[], dimensions: ImageDimensions) => {
+  if (edits.every((edit) => edit.action !== 'photo')) {
+    return;
+  }
+  const output = getOutputDimensions(edits, dimensions);
+  return transformPoints(
+    [
+      { x: 0, y: 0 },
+      { x: output.width, y: 0 },
+      { x: output.width, y: output.height },
+      { x: 0, y: output.height },
+    ],
+    edits,
+    output,
+    { inverse: true },
+  ).points;
+};
+
+const polygonOverlap = (box: BoundingBox, footprint: Point[]) => {
+  let polygon = footprint;
+  for (const [axis, limit, minimum] of [
+    ['x', box.x1, true],
+    ['x', box.x2, false],
+    ['y', box.y1, true],
+    ['y', box.y2, false],
+  ] as const) {
+    const result: Point[] = [];
+    for (const [index, point] of polygon.entries()) {
+      const previous = polygon[(index + polygon.length - 1) % polygon.length];
+      const inside = minimum ? point[axis] >= limit : point[axis] <= limit;
+      const previousInside = minimum ? previous[axis] >= limit : previous[axis] <= limit;
+      if (inside !== previousInside) {
+        const fraction = (limit - previous[axis]) / (point[axis] - previous[axis]);
+        result.push({
+          x: previous.x + fraction * (point.x - previous.x),
+          y: previous.y + fraction * (point.y - previous.y),
+        });
+      }
+      if (inside) {
+        result.push(point);
+      }
+    }
+    polygon = result;
+  }
+  let signedArea = 0;
+  for (const [index, point] of polygon.entries()) {
+    const next = polygon[(index + 1) % polygon.length];
+    signedArea += point.x * next.y - point.y * next.x;
+  }
+  const area = Math.abs(signedArea) / 2;
+  return area / ((box.x2 - box.x1) * (box.y2 - box.y1));
+};
+
 const scale = (box: BoundingBox, target: ImageDimensions, source?: ImageDimensions) => {
   const { width: sourceWidth = 1, height: sourceHeight = 1 } = source ?? {};
 
@@ -35,8 +90,10 @@ export const checkFaceVisibility = (
   faces: AssetFace[],
   originalAssetDimensions: ImageDimensions,
   crop?: BoundingBox,
+  edits: AssetEditActionItem[] = [],
 ): { visible: AssetFace[]; hidden: AssetFace[] } => {
-  if (!crop) {
+  const footprint = visibleFootprint(edits, originalAssetDimensions);
+  if (!crop && !footprint) {
     return {
       visible: faces.filter((face) => !face.isVisible),
       hidden: [],
@@ -55,7 +112,7 @@ export const checkFaceVisibility = (
       { width: face.imageWidth, height: face.imageHeight },
     );
 
-    const overlapPercentage = boundingBoxOverlap(scaledFace, crop);
+    const overlapPercentage = footprint ? polygonOverlap(scaledFace, footprint) : boundingBoxOverlap(scaledFace, crop!);
 
     return {
       face,
@@ -73,8 +130,10 @@ export const checkOcrVisibility = (
   ocrs: (AssetOcrResponseDto & { isVisible: boolean })[],
   originalAssetDimensions: ImageDimensions,
   crop?: BoundingBox,
+  edits: AssetEditActionItem[] = [],
 ): { visible: AssetOcrResponseDto[]; hidden: AssetOcrResponseDto[] } => {
-  if (!crop) {
+  const footprint = visibleFootprint(edits, originalAssetDimensions);
+  if (!crop && !footprint) {
     return {
       visible: ocrs.filter((ocr) => !ocr.isVisible),
       hidden: [],
@@ -92,7 +151,7 @@ export const checkOcrVisibility = (
       originalAssetDimensions,
     );
 
-    const overlapPercentage = boundingBoxOverlap(ocrBox, crop);
+    const overlapPercentage = footprint ? polygonOverlap(ocrBox, footprint) : boundingBoxOverlap(ocrBox, crop!);
 
     return {
       ocr,
