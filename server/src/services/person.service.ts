@@ -802,8 +802,8 @@ export class PersonService extends BaseService {
       const scaleFactor = asset.width / dto.imageWidth;
       topLeft = { x: topLeft.x * scaleFactor, y: topLeft.y * scaleFactor };
       bottomRight = { x: bottomRight.x * scaleFactor, y: bottomRight.y * scaleFactor };
-      const [invertedTopLeft, invertedBottomRight] = transformPoints(
-        [topLeft, bottomRight],
+      const invertedCorners = transformPoints(
+        [topLeft, { x: bottomRight.x, y: topLeft.y }, bottomRight, { x: topLeft.x, y: bottomRight.y }],
         edits,
         { width: asset.width, height: asset.height },
         { inverse: true },
@@ -811,12 +811,12 @@ export class PersonService extends BaseService {
 
       // make sure topLeft is top-left and bottomRight is bottom-right
       topLeft = {
-        x: Math.min(invertedTopLeft.x, invertedBottomRight.x),
-        y: Math.min(invertedTopLeft.y, invertedBottomRight.y),
+        x: Math.min(...invertedCorners.map((point) => point.x)),
+        y: Math.min(...invertedCorners.map((point) => point.y)),
       };
       bottomRight = {
-        x: Math.max(invertedTopLeft.x, invertedBottomRight.x),
-        y: Math.max(invertedTopLeft.y, invertedBottomRight.y),
+        x: Math.max(...invertedCorners.map((point) => point.x)),
+        y: Math.max(...invertedCorners.map((point) => point.y)),
       };
 
       // now coordinates are in original image space

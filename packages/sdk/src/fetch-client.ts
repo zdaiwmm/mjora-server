@@ -1396,12 +1396,28 @@ export type RotateParameters = {
 export type MirrorParameters = {
     axis: MirrorAxis;
 };
+export type PhotoParameters = {
+    blackPoint?: number;
+    brightness?: number;
+    contrast?: number;
+    exposure?: number;
+    highlights?: number;
+    horizontalPerspective?: number;
+    invert?: boolean;
+    saturation?: number;
+    shadows?: number;
+    straighten?: number;
+    tint?: number;
+    version: Version;
+    verticalPerspective?: number;
+    warmth?: number;
+};
 export type AssetEditActionItemResponseDto = {
     action: AssetEditAction;
     /** Asset edit ID */
     id: string;
-    /** List of edit actions to apply (crop, rotate, or mirror) */
-    parameters: CropParameters | RotateParameters | MirrorParameters;
+    /** List of edit actions to apply (crop, rotate, mirror, or photo) */
+    parameters: CropParameters | RotateParameters | MirrorParameters | PhotoParameters;
 };
 export type AssetEditsResponseDto = {
     /** Asset ID these edits belong to */
@@ -1411,11 +1427,11 @@ export type AssetEditsResponseDto = {
 };
 export type AssetEditActionItemDto = {
     action: AssetEditAction;
-    /** List of edit actions to apply (crop, rotate, or mirror) */
-    parameters: CropParameters | RotateParameters | MirrorParameters;
+    /** List of edit actions to apply (crop, rotate, mirror, or photo) */
+    parameters: CropParameters | RotateParameters | MirrorParameters | PhotoParameters;
 };
 export type AssetEditsCreateDto = {
-    /** List of edit actions to apply (crop, rotate, or mirror) */
+    /** List of edit actions to apply (crop, rotate, mirror, or photo) */
     edits: AssetEditActionItemDto[];
 };
 export type AssetMetadataResponseDto = {
@@ -2915,6 +2931,8 @@ export type ServerFeaturesDto = {
     ocr: boolean;
     /** Whether password login is enabled */
     passwordLogin: boolean;
+    /** Whether whole-intent photo editor v1 color and geometry actions are supported */
+    photoEditsV1: boolean;
     /** Whether real-time transcoding is enabled */
     realtimeTranscoding: boolean;
     /** Whether reverse geocoding is enabled */
@@ -8528,11 +8546,15 @@ export enum AssetTypeEnum {
 export enum AssetEditAction {
     Crop = "crop",
     Rotate = "rotate",
-    Mirror = "mirror"
+    Mirror = "mirror",
+    Photo = "photo"
 }
 export enum MirrorAxis {
     Horizontal = "horizontal",
     Vertical = "vertical"
+}
+export enum Version {
+    $1 = 1
 }
 export enum AssetMediaSize {
     Original = "original",

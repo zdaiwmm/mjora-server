@@ -6,10 +6,11 @@ import { Duration } from 'luxon';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { Writable } from 'node:stream';
+import { Worker } from 'node:worker_threads';
 import sharp, { Sharp } from 'sharp';
 import { ORIENTATION_TO_SHARP_ROTATION } from 'src/constants.js';
 import { Exif } from 'src/database.js';
-import { AssetEditActionItem } from 'src/dtos/editing.dto.js';
+import { AssetEditActionItem, PhotoParametersSchema } from 'src/dtos/editing.dto.js';
 import {
   AacProfile,
   Av1Profile,
@@ -166,7 +167,7 @@ export class MediaRepository {
       });
     }
 
-    const affineEditOperations = edits.filter((edit) => edit.action !== 'crop');
+    const affineEditOperations = edits.filter((edit) => edit.action === 'rotate' || edit.action === 'mirror');
     if (affineEditOperations.length > 0) {
       const { a, b, c, d } = createAffineMatrix(affineEditOperations);
       pipeline = pipeline.affine([
@@ -214,11 +215,48 @@ export class MediaRepository {
     return colorspace === Colorspace.Srgb ? 'srgb' : 'rgb16';
   }
 
+  /** Render once off the queue event loop; callers can reuse this bitmap for derivative fan-out. */
+  async preparePhotoEdits(image: Bitmap, edits: AssetEditActionItem[]): Promise<Bitmap> {
+    if (edits.every((edit) => edit.action !== 'photo')) {
+      return image;
+    }
+    const normalized = edits.map((edit) =>
+      edit.action === 'photo' ? { ...edit, parameters: PhotoParametersSchema.parse(edit.parameters) } : edit,
+    );
+    // Transfer an owned copy; the caller's decoded bitmap must never be detached.
+    const bytes = new Uint8Array(image.data);
+    const extension = import.meta.filename.endsWith('.ts') ? '.ts' : '.js';
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(new URL(`../workers/photo-edit${extension}`, import.meta.url), {
+        workerData: { bytes, info: image.info, edits: normalized },
+        transferList: [bytes.buffer],
+      });
+      let completed = false;
+      worker.once('message', ({ bytes, info }: { bytes: Uint8Array; info: Bitmap['info'] }) => {
+        completed = true;
+        resolve({ data: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), info });
+      });
+      worker.once('error', (error) => {
+        completed = true;
+        reject(error);
+      });
+      worker.once('exit', (code) => {
+        if (!completed) {
+          reject(new Error(`Photo edit worker exited without a result (code ${code})`));
+        }
+      });
+    });
+  }
+
   /* Resamples in linear light; averaging gamma-encoded values darkens the result and loses detail. `colorspace`
    * always has a sRGB transfer function and scRGB applies no primaries matrix, so linearising as sRGB is exact. */
-  private transform(image: Bitmap, { size, fit = 'outside', edits = [] }: TransformOptions): Promise<Bitmap> {
+  private async transform(image: Bitmap, { size, fit = 'outside', edits = [] }: TransformOptions): Promise<Bitmap> {
+    if (edits.some((edit) => edit.action === 'photo')) {
+      image = await this.preparePhotoEdits(image, edits);
+      edits = [];
+    }
     if (!size && edits.length === 0) {
-      return Promise.resolve(image);
+      return image;
     }
 
     return this.edit(this.raw(image).pipelineColorspace('scrgb'), edits)

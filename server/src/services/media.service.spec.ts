@@ -2,7 +2,7 @@ import { ShallowDehydrateObject } from 'kysely';
 import { OutputInfo } from 'sharp';
 import { Exif } from 'src/database.js';
 import { SystemConfig } from 'src/dtos/config.dto.js';
-import { AssetEditAction } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, PhotoParametersSchema } from 'src/dtos/editing.dto.js';
 import {
   AssetFileType,
   AssetPathType,
@@ -1421,6 +1421,44 @@ describe(MediaService.name, () => {
         ),
       );
       mocks.media.getImageMetadata.mockResolvedValue({ width: 100, height: 100, isTransparent: false });
+    });
+
+    it('decodes enhanced edited derivatives into nonlinear sRGB while retaining original metadata', async () => {
+      rawInfo = { width: 101, height: 99, channels: 3 };
+      const asset = AssetFactory.from()
+        .exif({ colorspace: 'Adobe RGB', exifImageWidth: 101, exifImageHeight: 99 })
+        .edit({ action: AssetEditAction.Photo, parameters: PhotoParametersSchema.parse({ version: 1, exposure: 20 }) })
+        .build();
+      mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
+      mocks.media.generateThumbhash.mockResolvedValue(Buffer.from('thumbhash'));
+      await sut.handleAssetEditThumbnailGeneration({ id: asset.id });
+      expect(mocks.media.decodeImage).toHaveBeenCalledWith(
+        asset.originalPath,
+        expect.objectContaining({ colorspace: Colorspace.Srgb }),
+      );
+      expect(mocks.asset.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: asset.id, width: 101, height: 99 }),
+      );
+    });
+
+    it('prepares enhanced pixels once and reuses them for every derivative', async () => {
+      const asset = AssetFactory.from()
+        .exif()
+        .edit({ action: AssetEditAction.Photo, parameters: PhotoParametersSchema.parse({ version: 1, exposure: 20 }) })
+        .build();
+      const prepared = { data: Buffer.from('prepared pixels'), info: rawInfo };
+      mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
+      mocks.media.preparePhotoEdits.mockResolvedValue(prepared);
+      mocks.media.generateThumbhash.mockResolvedValue(Buffer.from('thumbhash'));
+      await sut.handleAssetEditThumbnailGeneration({ id: asset.id });
+      expect(mocks.media.preparePhotoEdits).toHaveBeenCalledTimes(1);
+      expect(mocks.media.generateThumbnail).toHaveBeenCalledTimes(3);
+      for (const [bitmap, options] of mocks.media.generateThumbnail.mock.calls) {
+        expect(bitmap).toBe(prepared);
+        expect(options.edits).toEqual([]);
+      }
+      expect(mocks.media.generateThumbhash.mock.calls[0][0]).toBe(prepared);
+      expect(mocks.media.generateThumbhash.mock.calls[0][1].edits).toEqual([]);
     });
 
     it('should skip videos', async () => {

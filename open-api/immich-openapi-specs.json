@@ -20803,7 +20803,8 @@
         "enum": [
           "crop",
           "rotate",
-          "mirror"
+          "mirror",
+          "photo"
         ],
         "type": "string"
       },
@@ -20822,9 +20823,12 @@
               },
               {
                 "$ref": "#/components/schemas/MirrorParameters"
+              },
+              {
+                "$ref": "#/components/schemas/PhotoParameters"
               }
             ],
-            "description": "List of edit actions to apply (crop, rotate, or mirror)"
+            "description": "List of edit actions to apply (crop, rotate, mirror, or photo)"
           }
         },
         "required": [
@@ -20854,9 +20858,12 @@
               },
               {
                 "$ref": "#/components/schemas/MirrorParameters"
+              },
+              {
+                "$ref": "#/components/schemas/PhotoParameters"
               }
             ],
-            "description": "List of edit actions to apply (crop, rotate, or mirror)"
+            "description": "List of edit actions to apply (crop, rotate, mirror, or photo)"
           }
         },
         "required": [
@@ -20869,7 +20876,7 @@
       "AssetEditsCreateDto": {
         "properties": {
           "edits": {
-            "description": "List of edit actions to apply (crop, rotate, or mirror)",
+            "description": "List of edit actions to apply (crop, rotate, mirror, or photo)",
             "items": {
               "$ref": "#/components/schemas/AssetEditActionItemDto"
             },
@@ -26246,6 +26253,108 @@
         },
         "type": "array"
       },
+      "PhotoParameters": {
+        "properties": {
+          "blackPoint": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "brightness": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "contrast": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "exposure": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "highlights": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "horizontalPerspective": {
+            "default": 0,
+            "format": "double",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "invert": {
+            "default": false,
+            "type": "boolean"
+          },
+          "saturation": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "shadows": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "straighten": {
+            "default": 0,
+            "format": "double",
+            "maximum": 45,
+            "minimum": -45,
+            "type": "number"
+          },
+          "tint": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          },
+          "version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "verticalPerspective": {
+            "default": 0,
+            "format": "double",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "warmth": {
+            "default": 0,
+            "format": "double",
+            "maximum": 100,
+            "minimum": -100,
+            "type": "number"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
       "PinCodeChangeDto": {
         "properties": {
           "newPinCode": {
@@ -28503,6 +28612,10 @@
             "description": "Whether password login is enabled",
             "type": "boolean"
           },
+          "photoEditsV1": {
+            "description": "Whether whole-intent photo editor v1 color and geometry actions are supported",
+            "type": "boolean"
+          },
           "realtimeTranscoding": {
             "description": "Whether real-time transcoding is enabled",
             "type": "boolean"
@@ -28540,6 +28653,7 @@
           "oauthAutoLaunch",
           "ocr",
           "passwordLogin",
+          "photoEditsV1",
           "realtimeTranscoding",
           "reverseGeocoding",
           "search",

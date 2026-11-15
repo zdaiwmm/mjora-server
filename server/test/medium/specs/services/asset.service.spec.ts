@@ -1,5 +1,5 @@
 import { Kysely } from 'kysely';
-import { AssetEditAction } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, AssetEditsCreateDto } from 'src/dtos/editing.dto.js';
 import { AssetFileType, AssetMetadataKey, AssetStatus, JobName, SharedLinkType } from 'src/enum.js';
 import { AccessRepository } from 'src/repositories/access.repository.js';
 import { AlbumRepository } from 'src/repositories/album.repository.js';
@@ -891,6 +891,37 @@ describe(AssetService.name, () => {
   });
 
   describe('editAsset', () => {
+    it('reconciles complete mixed photo intent without changing original identity', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: asset.id, exifImageHeight: 43, exifImageWidth: 69, orientation: '1' });
+      const dto = AssetEditsCreateDto.schema.parse({
+        edits: [
+          { action: 'crop', parameters: { x: 0, y: 1, width: 33, height: 41 } },
+          { action: 'rotate', parameters: { angle: 90 } },
+          {
+            action: 'photo',
+            parameters: { version: 1, exposure: 0.125, horizontalPerspective: -0.75, straighten: 10 },
+          },
+        ],
+      });
+      const accepted = await sut.editAsset(auth, asset.id, dto);
+      await expect(sut.getAssetEdits(auth, asset.id)).resolves.toEqual(accepted);
+      expect(accepted.edits.map(({ action, parameters }) => ({ action, parameters }))).toEqual(dto.edits);
+      await expect(ctx.get(AssetRepository).getById(asset.id)).resolves.toEqual(
+        expect.objectContaining({
+          originalPath: asset.originalPath,
+          originalFileName: asset.originalFileName,
+          checksum: asset.checksum,
+        }),
+      );
+      await sut.removeAssetEdits(auth, asset.id);
+      await expect(sut.getAssetEdits(auth, asset.id)).resolves.toEqual({ assetId: asset.id, edits: [] });
+    });
+
     it('should require access', async () => {
       const { sut, ctx } = setup();
       const { user } = await ctx.newUser();

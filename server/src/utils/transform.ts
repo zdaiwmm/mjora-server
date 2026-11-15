@@ -1,7 +1,8 @@
 import { Matrix, applyToPoint, compose, flipX, flipY, identity, rotate, scale, translate } from 'transformation-matrix';
-import { AssetEditAction, AssetEditActionItem } from 'src/dtos/editing.dto.js';
+import { AssetEditAction, AssetEditActionItem, PhotoParametersSchema } from 'src/dtos/editing.dto.js';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto.js';
 import type { ImageDimensions } from 'src/types.js';
+import { createPhotoWarp } from 'src/utils/photo-edit.js';
 
 export const getOutputDimensions = (
   edits: AssetEditActionItem[],
@@ -102,6 +103,17 @@ export const transformPoints = (
   // Apply rotate and mirror transforms
   const editSequence = inverse ? edits.toReversed() : edits;
   for (const edit of editSequence) {
+    if (edit.action === 'photo') {
+      const warp = createPhotoWarp(PhotoParametersSchema.parse(edit.parameters));
+      transformedPoints = transformedPoints.map((point) => {
+        const normalized = (inverse ? warp.inverse : warp.forward)(
+          (2 * point.x) / currentWidth - 1,
+          (2 * point.y) / currentHeight - 1,
+        );
+        return { x: ((normalized.x + 1) * currentWidth) / 2, y: ((normalized.y + 1) * currentHeight) / 2 };
+      });
+      continue;
+    }
     let matrix: Matrix = identity();
     if (edit.action === 'rotate') {
       const angleDegrees = edit.parameters.angle;
@@ -173,18 +185,19 @@ export const transformFaceBoundingBox = (
 
   const points: Point[] = [
     { x: box.boundingBoxX1 * scaleX, y: box.boundingBoxY1 * scaleY },
+    { x: box.boundingBoxX2 * scaleX, y: box.boundingBoxY1 * scaleY },
     { x: box.boundingBoxX2 * scaleX, y: box.boundingBoxY2 * scaleY },
+    { x: box.boundingBoxX1 * scaleX, y: box.boundingBoxY2 * scaleY },
   ];
 
   const { points: transformedPoints, currentWidth, currentHeight } = transformPoints(points, edits, imageDimensions);
 
   // Ensure x1,y1 is top-left and x2,y2 is bottom-right
-  const [p1, p2] = transformedPoints;
   return {
-    boundingBoxX1: Math.trunc(Math.min(p1.x, p2.x)),
-    boundingBoxY1: Math.trunc(Math.min(p1.y, p2.y)),
-    boundingBoxX2: Math.trunc(Math.max(p1.x, p2.x)),
-    boundingBoxY2: Math.trunc(Math.max(p1.y, p2.y)),
+    boundingBoxX1: Math.trunc(Math.min(...transformedPoints.map((point) => point.x))),
+    boundingBoxY1: Math.trunc(Math.min(...transformedPoints.map((point) => point.y))),
+    boundingBoxX2: Math.trunc(Math.max(...transformedPoints.map((point) => point.x))),
+    boundingBoxY2: Math.trunc(Math.max(...transformedPoints.map((point) => point.y))),
     imageWidth: currentWidth,
     imageHeight: currentHeight,
   };

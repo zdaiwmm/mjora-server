@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AssetFace } from 'src/database.js';
+import { AssetEditAction, PhotoParametersSchema } from 'src/dtos/editing.dto.js';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto.js';
 import { AssetVisibility, SourceType } from 'src/enum.js';
 import { boundingBoxOverlap, checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor.js';
@@ -504,5 +505,42 @@ describe('checkOcrVisibility', () => {
     // 40% overlap should be hidden
     expect(result2.visible).toHaveLength(0);
     expect(result2.hidden).toHaveLength(1);
+  });
+});
+
+describe('enhanced warp visibility', () => {
+  it('hides a face removed by the fill crop from straighten', () => {
+    const face = {
+      boundingBoxX1: 0,
+      boundingBoxY1: 0,
+      boundingBoxX2: 10,
+      boundingBoxY2: 10,
+      imageWidth: 100,
+      imageHeight: 100,
+      isVisible: true,
+    } as AssetFace;
+    const result = checkFaceVisibility([face], { width: 100, height: 100 }, undefined, [
+      { action: AssetEditAction.Photo, parameters: PhotoParametersSchema.parse({ version: 1, straighten: 45 }) },
+    ]);
+    expect(result.hidden).toEqual([face]);
+    expect(result.visible).toEqual([]);
+  });
+  it('removes OCR from search visibility when straighten crops it away', () => {
+    const ocr = {
+      x1: 0,
+      y1: 0,
+      x2: 0.1,
+      y2: 0,
+      x3: 0.1,
+      y3: 0.1,
+      x4: 0,
+      y4: 0.1,
+      isVisible: true,
+    } as AssetOcrResponseDto & { isVisible: boolean };
+    expect(
+      checkOcrVisibility([ocr], { width: 100, height: 100 }, undefined, [
+        { action: AssetEditAction.Photo, parameters: PhotoParametersSchema.parse({ version: 1, straighten: 45 }) },
+      ]),
+    ).toEqual({ visible: [], hidden: [ocr] });
   });
 });
