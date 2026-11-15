@@ -322,8 +322,15 @@ export class MediaService extends BaseService {
     this.storageCore.ensureFolders(previewFile.path);
 
     // generate final images
-    const decoded = { data, info };
-    const baseOptions = { colorspace, processInvalidImages: false, edits: useEdits ? asset.edits : [] };
+    const hasPhotoEdits = useEdits && asset.edits.some((edit) => edit.action === AssetEditAction.Photo);
+    const decoded = hasPhotoEdits
+      ? await this.mediaRepository.preparePhotoEdits({ data, info }, asset.edits)
+      : { data, info };
+    const baseOptions = {
+      colorspace,
+      processInvalidImages: false,
+      edits: useEdits && !hasPhotoEdits ? asset.edits : [],
+    };
     const thumbnailOptions = {
       ...image.thumbnail,
       ...baseOptions,

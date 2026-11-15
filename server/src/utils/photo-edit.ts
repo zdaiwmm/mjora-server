@@ -1,4 +1,4 @@
-import { AssetEditActionItem, PhotoParameters, PhotoParametersSchema } from 'src/dtos/editing.dto.js';
+import type { AssetEditActionItem, PhotoParameters } from 'src/dtos/editing.dto.js';
 import type { Bitmap } from 'src/types.js';
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -99,12 +99,17 @@ export const applyPhotoEdits = (input: Bitmap, edits: AssetEditActionItem[]): Bi
   if (!photo) {
     return input;
   }
-  const p = PhotoParametersSchema.parse(photo.parameters);
+  const p = photo.parameters;
   const image = legacyGeometry(input, edits);
   const { width, height, channels } = image.info;
   const warp = createPhotoWarp(p);
   const data = Buffer.alloc(image.data.length);
-  const sample = (x: number, y: number, channel: number) => image.data[(y * width + x) * channels + channel] / 255;
+  const sample = (x: number, y: number, channel: number) => {
+    const offset = (y * width + x) * channels;
+    const value = image.data[offset + channel] / 255;
+    // Sharp raw RGBA is straight; CI and the warp interpolate premultiplied pixels.
+    return channels === 4 && channel < 3 ? (value * image.data[offset + 3]) / 255 : value;
+  };
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const point = warp.inverse(
@@ -125,7 +130,8 @@ export const applyPhotoEdits = (input: Bitmap, edits: AssetEditActionItem[]): Bi
           (sample(x0, y0, channel) * (1 - dx) + sample(x1, y0, channel) * dx) * (1 - dy) +
           (sample(x0, y1, channel) * (1 - dx) + sample(x1, y1, channel) * dx) * dy,
       );
-      let [r, g, b] = values;
+      const alpha = channels === 4 ? values[3] : 1;
+      let [r, g, b] = values.slice(0, 3).map((value) => (alpha > 0 ? value / alpha : 0));
       const gray = luma(r, g, b);
       const saturation = 1 + p.saturation / 100;
       [r, g, b] = [r, g, b].map((value) => clamp(gray + saturation * (value - gray)));
@@ -150,7 +156,7 @@ export const applyPhotoEdits = (input: Bitmap, edits: AssetEditActionItem[]): Bi
       [r, g, b] = [r, g, b].map((value) => clamp((value - 0.5) * (1 + p.contrast / 100) + 0.5));
       const offset = (y * width + x) * channels;
       for (const [channel, value] of [r, g, b, ...values.slice(3)].entries()) {
-        data[offset + channel] = Math.round(value * 255);
+        data[offset + channel] = Math.round((alpha === 0 && channel < 3 ? 0 : value) * 255);
       }
     }
   }

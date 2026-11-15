@@ -4,6 +4,7 @@ import type { RepositoryInterface } from 'src/types.js';
 
 export const newMediaRepositoryMock = (): Mocked<RepositoryInterface<MediaRepository>> => {
   return {
+    preparePhotoEdits: vitest.fn().mockImplementation((image) => Promise.resolve(image)),
     generateThumbnail: vitest.fn().mockImplementation(() => Promise.resolve()),
     writeExif: vitest.fn().mockImplementation(() => Promise.resolve()),
     copyTagGroup: vitest.fn().mockImplementation(() => Promise.resolve()),

@@ -21,12 +21,16 @@ describe('photo edits actual pixel pipeline', () => {
     await fs.rm(directory, { recursive: true, force: true });
   });
 
-  const render = async (pixels: number[], width: number, height: number, edits: AssetEditActionItem[]) => {
+  const render = async (
+    pixels: number[],
+    width: number,
+    height: number,
+    edits: AssetEditActionItem[],
+    channels: 3 | 4 = 3,
+  ) => {
     const output = path.join(directory, 'edited.png');
     const source = path.join(directory, 'original.png');
-    await sharp(Buffer.from(pixels), { raw: { width, height, channels: 3 } })
-      .png()
-      .toFile(source);
+    await sharp(Buffer.from(pixels), { raw: { width, height, channels } }).png().toFile(source);
     const original = await fs.readFile(source);
     const decoded = await sut.decodeImage(source, { colorspace: 'srgb', processInvalidImages: false });
     await sut.generateThumbnail(
@@ -44,6 +48,35 @@ describe('photo edits actual pixel pipeline', () => {
     expect(await fs.readFile(source)).toEqual(original);
     return sharp(output).raw().toBuffer({ resolveWithObject: true });
   };
+
+  it('interpolates premultiplied transparent edges and returns straight RGBA', async () => {
+    const row = [0, 255, 0, 255, 255, 0, 0, 0, 0, 0, 255, 255];
+    const { data } = await render([...row, ...row, ...row], 3, 3, photo({ horizontalPerspective: 1 }), 4);
+    expect([...data.subarray(20, 24)]).toEqual([0, 0, 255, 153]);
+    expect(data[19]).toBe(0);
+    const prepared = await sut.preparePhotoEdits(
+      { data: Buffer.from([...row, ...row, ...row]), info: { width: 3, height: 3, channels: 4 } },
+      photo({ horizontalPerspective: 1, invert: true }),
+    );
+    expect([...prepared.data.subarray(16, 20)]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('allows a heartbeat timer to run while a photo render is pending', async () => {
+    const image = { data: Buffer.alloc(500 * 500 * 3, 64), info: { width: 500, height: 500, channels: 3 as const } };
+    let heartbeats = 0;
+    const timer = setInterval(() => {
+      heartbeats++;
+    }, 5);
+    try {
+      const result = await sut['transform'](image, { edits: photo({ exposure: 20 }) });
+      expect(result.data[0]).toBe(77);
+      expect(heartbeats).toBeGreaterThan(0);
+      expect(image.data[0]).toBe(64);
+      expect(image.data.length).toBe(750_000);
+    } finally {
+      clearInterval(timer);
+    }
+  });
 
   it.each([
     [1, 1],

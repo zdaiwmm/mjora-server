@@ -1441,6 +1441,26 @@ describe(MediaService.name, () => {
       );
     });
 
+    it('prepares enhanced pixels once and reuses them for every derivative', async () => {
+      const asset = AssetFactory.from()
+        .exif()
+        .edit({ action: AssetEditAction.Photo, parameters: PhotoParametersSchema.parse({ version: 1, exposure: 20 }) })
+        .build();
+      const prepared = { data: Buffer.from('prepared pixels'), info: rawInfo };
+      mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
+      mocks.media.preparePhotoEdits.mockResolvedValue(prepared);
+      mocks.media.generateThumbhash.mockResolvedValue(Buffer.from('thumbhash'));
+      await sut.handleAssetEditThumbnailGeneration({ id: asset.id });
+      expect(mocks.media.preparePhotoEdits).toHaveBeenCalledTimes(1);
+      expect(mocks.media.generateThumbnail).toHaveBeenCalledTimes(3);
+      for (const [bitmap, options] of mocks.media.generateThumbnail.mock.calls) {
+        expect(bitmap).toBe(prepared);
+        expect(options.edits).toEqual([]);
+      }
+      expect(mocks.media.generateThumbhash.mock.calls[0][0]).toBe(prepared);
+      expect(mocks.media.generateThumbhash.mock.calls[0][1].edits).toEqual([]);
+    });
+
     it('should skip videos', async () => {
       const asset = AssetFactory.from({ type: AssetType.Video }).exif().build();
       mocks.assetJob.getForGenerateThumbnailJob.mockResolvedValue(getForGenerateThumbnail(asset));
