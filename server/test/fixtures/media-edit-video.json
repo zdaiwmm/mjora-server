@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "video",
+  "renderProfile": "sdr709-1080-v1",
+  "source": {
+    "sourceRevision": "source:1",
+    "baselineKind": "foreignCurrent",
+    "displayWidth": 1920,
+    "displayHeight": 1080,
+    "colorProfile": "sdr709",
+    "orientationRevision": "orientation:1",
+    "duration": { "value": "2000", "timescale": 1000 },
+    "frameIndexRevision": "pts:1",
+    "components": [{
+      "role": "foreignCurrent",
+      "remoteAssetID": "4120d0f4-d139-438a-aa98-7d2e84e2b389",
+      "digest": { "algorithm": "sha256", "hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "byteCount": "1234",
+      "contentRevision": "bytes:1",
+      "displayWidth": 1920,
+      "displayHeight": 1080,
+      "displayTransform": { "a": 1, "b": 0, "c": 0, "d": 1, "tx": 0, "ty": 0 },
+      "cleanAperture": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
+      "colorProfile": "sdr709"
+    }]
+  },
+  "geometry": {
+    "crop": null,
+    "mirrorHorizontal": false,
+    "mirrorVertical": false,
+    "quarterTurnsClockwise": 0,
+    "straighten": 0,
+    "horizontalPerspective": 0,
+    "verticalPerspective": 0
+  },
+  "color": {
+    "version": 1,
+    "exposure": 0,
+    "contrast": 0,
+    "saturation": 0,
+    "invert": false,
+    "highlights": 0,
+    "shadows": 0,
+    "brightness": 0,
+    "blackPoint": 0,
+    "warmth": 0,
+    "tint": 0
+  },
+  "video": { "in": { "value": "0", "timescale": 1000 }, "out": { "value": "2000", "timescale": 1000 }, "muted": false }
+}
