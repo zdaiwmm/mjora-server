@@ -29,6 +29,19 @@ describe('encrypted background upload recovery', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('reserves the full final import copy even after most original bytes are acknowledged', async () => {
+    const size = 10 * 1024 * 1024;
+    store = new BackgroundUploadStore(root, () => Promise.resolve(256 * 1024 * 1024 + 26 * 1024 * 1024));
+    const bytes = Buffer.alloc(size);
+    const value = await store.start('owner', createHash('sha1').update(bytes).digest('base64'), size, metadata);
+    await store.stage(value, 0, seal(value, 0, bytes.subarray(0, backgroundPartBytes)));
+    await store.reconcile(value);
+    expect(value.offset).toBe(backgroundPartBytes);
+    await expect(store.start('owner', Buffer.alloc(20, 1).toString('base64'), size, metadata)).rejects.toThrow(
+      'Insufficient storage',
+    );
+  });
+
   it('resumes across store recreation and out-of-order daemon completion without retransmitting acknowledged bytes', async () => {
     const data = randomBytes(backgroundPartBytes + 321);
     const checksum = createHash('sha1').update(data).digest('base64');
