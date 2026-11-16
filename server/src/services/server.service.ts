@@ -101,6 +101,7 @@ export class ServerService extends BaseService {
     const { configFile } = this.configRepository.getEnv();
 
     return {
+      backgroundUploadsV1: true,
       photoEditsV1: true,
       smartSearch: isSmartSearchEnabled(machineLearning),
       facialRecognition: isFacialRecognitionEnabled(machineLearning),
