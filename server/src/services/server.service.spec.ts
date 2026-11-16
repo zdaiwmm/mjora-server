@@ -134,6 +134,7 @@ describe(ServerService.name, () => {
   describe('getFeatures', () => {
     it('should respond the server features', async () => {
       await expect(sut.getFeatures()).resolves.toEqual({
+        backgroundUploadsV1: true,
         photoEditsV1: true,
         smartSearch: true,
         duplicateDetection: true,

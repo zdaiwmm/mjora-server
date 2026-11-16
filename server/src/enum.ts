@@ -1015,6 +1015,7 @@ export enum VectorIndex {
 }
 
 export enum DatabaseLock {
+  BackgroundUploads = 1100,
   GeodataImport = 100,
   Migrations = 200,
   SystemFileMounts = 300,
