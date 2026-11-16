@@ -25,7 +25,13 @@ export type BackgroundUpload = {
 /** Call under the database advisory lock. Only ciphertext crosses the daemon boundary.
 A public staging request has no authority to import, read, or delete an asset. */
 export class BackgroundUploadStore {
-  constructor(private root: string) {}
+  constructor(
+    private root: string,
+    private availableBytes: () => Promise<number> = async () => {
+      const capacity = await statfs(root);
+      return capacity.bavail * capacity.bsize;
+    },
+  ) {}
 
   directory(id: string) {
     if (!/^[a-f\d]{64}$/.test(id)) {
@@ -91,7 +97,9 @@ export class BackgroundUploadStore {
       try {
         const item = await this.read(name);
         if (!item.result) {
-          reserved += 2 * Math.max(0, item.size - item.offset);
+          // Existing acknowledged bytes already occupy disk, but the final
+          // import still needs a complete copy in the media upload directory.
+          reserved += item.size + Math.max(0, item.size - item.offset);
         }
         if (item.owner === owner && !item.result) {
           active++;
@@ -106,8 +114,7 @@ export class BackgroundUploadStore {
     if (active >= 16) {
       throw new BadRequestException('Too many unfinished background uploads');
     }
-    const capacity = await statfs(this.root);
-    if (reserved + 2 * size + 256 * 1024 * 1024 > capacity.bavail * capacity.bsize) {
+    if (reserved + 2 * size + 256 * 1024 * 1024 > (await this.availableBytes())) {
       throw new BadRequestException('Insufficient storage for a resumable upload');
     }
     await rm(this.directory(id), { recursive: true, force: true });
