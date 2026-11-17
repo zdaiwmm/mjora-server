@@ -87,7 +87,7 @@ describe('background upload authorization and import', () => {
       size: data.length,
       checksum: dto.checksum,
       isFavorite: String(favorite),
-      visibility: AssetVisibility.HIDDEN,
+      visibility: AssetVisibility.Hidden,
       livePhotoVideoId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       metadata: JSON.stringify([{ key: 'fixture', value: { description: 'synthetic metadata' } }]),
     });
@@ -113,7 +113,8 @@ describe('background upload authorization and import', () => {
       metadata: input.metadata,
     });
     const imported = assets.uploadAsset.mock.calls[0][2] as UploadFile;
-    expect((await readFile(imported.originalPath)).equals(data)).toBe(true);
+    const importedBytes = await readFile(imported.originalPath);
+    expect(importedBytes.equals(data)).toBe(true);
     assets.getUploadAssetIdByChecksum.mockResolvedValue({ id: 'asset', status: AssetMediaStatus.DUPLICATE });
     await reopened.status(authStub.user1, state.uploadId);
     expect(assets.uploadAsset).toHaveBeenCalledTimes(1);

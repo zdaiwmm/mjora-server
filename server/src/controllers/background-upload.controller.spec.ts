@@ -74,7 +74,7 @@ describe('background upload HTTP contract', () => {
     const opened = await request(app.getHttpServer())
       .post('/api/assets/background-uploads')
       .set('Authorization', 'Bearer synthetic-fixture')
-      .send({ ...metadata, ...(favorite === undefined ? {} : { isFavorite: String(favorite) }) })
+      .send({ ...metadata, ...(favorite !== undefined && { isFavorite: String(favorite) }) })
       .expect(201);
     expect(opened.headers['cache-control']).toBe('no-store');
     const state = opened.body;
