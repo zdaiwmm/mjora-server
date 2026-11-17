@@ -1,5 +1,7 @@
 import gzip
+from contextlib import contextmanager, redirect_stdout
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -42,6 +44,131 @@ class BackupCheckTests(unittest.TestCase):
 
     def check(self, replica=True):
         return backup.check(self.source, self.dumps, self.replica if replica else None)
+
+    @contextmanager
+    def independent_replica(self, source_mounts=()):
+        """Model device numbers only; paths, file contents and symlinks are real."""
+        replica = self.replica.resolve()
+        source_mounts = tuple(path.resolve() for path in source_mounts)
+        real_stat = Path.stat
+
+        def mounted_stat(path, *args, **kwargs):
+            value = real_stat(path, *args, **kwargs)
+            lexical = Path(os.path.abspath(path))
+            canonical = Path(os.path.realpath(path))
+            on_replica = canonical == replica or replica in canonical.parents
+            on_source = any(lexical == mount or mount in lexical.parents for mount in source_mounts)
+            device = 2 if on_replica and not on_source else 1
+            return SimpleNamespace(**{key: device if key == "st_dev" else getattr(value, key)
+                                      for key in dir(value) if key.startswith("st_")})
+
+        with patch.object(Path, "stat", mounted_stat):
+            yield
+
+    def test_independent_replica_with_all_files_verified_is_ok(self):
+        with self.independent_replica():
+            result = self.check()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["issues"], [])
+        self.assertTrue(result["replica"]["filesystemSeparated"])
+
+    def test_nested_replica_directory_and_file_on_source_filesystem_are_critical(self):
+        for mount in (self.replica / "upload", self.replica / "upload" / self.photo.name):
+            with self.subTest(mount=mount.name), self.independent_replica([mount]):
+                result = self.check()
+            self.assertEqual(result["status"], "critical")
+            self.assertFalse(result["replica"]["filesystemSeparated"])
+            self.assertIn("replica_uses_source_filesystem", result["issues"])
+
+    def test_empty_replica_directory_on_source_filesystem_is_critical(self):
+        (self.source / "upload" / "empty").mkdir()
+        other = self.replica / "upload" / "empty"
+        other.mkdir()
+        with self.independent_replica([other]):
+            result = self.check()
+        self.assertEqual(result["status"], "critical")
+        self.assertFalse(result["replica"]["filesystemSeparated"])
+
+    def test_database_replica_file_on_source_filesystem_is_critical(self):
+        other = self.replica / "backups" / self.dump.name
+        with self.independent_replica([other]):
+            result = self.check()
+        self.assertEqual(result["status"], "critical")
+        self.assertFalse(result["replica"]["filesystemSeparated"])
+        self.assertIn("replica_uses_source_filesystem", result["issues"])
+
+    def test_database_parent_symlink_is_rejected_by_cli(self):
+        other = self.replica / "backups"
+        (other / self.dump.name).unlink()
+        other.rmdir()
+        other.symlink_to(self.dumps, target_is_directory=True)
+        output = io.StringIO()
+        argv = [str(SCRIPT), "--source-root", str(self.source), "--backup-dir", str(self.dumps),
+                "--replica-root", str(self.replica)]
+        with self.independent_replica(), patch.object(sys, "argv", argv), redirect_stdout(output):
+            code = backup.main()
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(result["status"], "critical")
+        self.assertIn("database_replica_missing_or_changed", result["issues"])
+        self.assertFalse(result["replica"]["filesystemSeparated"])
+        self.assertNotIn(str(self.source), output.getvalue())
+
+    def test_unreadable_replica_cannot_report_separation_verified(self):
+        other = (self.replica / "upload" / self.photo.name).resolve()
+        real_digest = backup.digest
+
+        def unreadable(path, *args, **kwargs):
+            if path == other:
+                raise PermissionError("synthetic denial")
+            return real_digest(path, *args, **kwargs)
+
+        with self.independent_replica(), patch.object(backup, "digest", side_effect=unreadable):
+            result = self.check()
+        self.assertEqual(result["status"], "critical")
+        self.assertIn("original_replica_incomplete_or_changed", result["issues"])
+        self.assertFalse(result["replica"]["filesystemSeparated"])
+
+    def test_digest_rejects_filesystem_change_during_read(self):
+        real_stat = Path.stat
+        calls = 0
+
+        def changed_device(path, *args, **kwargs):
+            nonlocal calls
+            value = real_stat(path, *args, **kwargs)
+            calls += 1
+            return SimpleNamespace(**{key: calls if key == "st_dev" else getattr(value, key)
+                                      for key in dir(value) if key.startswith("st_")})
+
+        with patch.object(Path, "stat", changed_device):
+            with self.assertRaises(OSError):
+                backup.digest(self.photo)
+
+    def test_replica_mount_change_before_hashing_is_not_missed(self):
+        other = (self.replica / "upload" / self.photo.name).resolve()
+        transfer_started = False
+        real_digest = backup.digest
+        with self.independent_replica():
+            model_stat = Path.stat
+
+            def changed_mount(path, *args, **kwargs):
+                value = model_stat(path, *args, **kwargs)
+                if Path(path) == other and transfer_started:
+                    return SimpleNamespace(**{key: 1 if key == "st_dev" else getattr(value, key)
+                                              for key in dir(value) if key.startswith("st_")})
+                return value
+
+            def digest_after_mount_change(path, *args, **kwargs):
+                nonlocal transfer_started
+                if path == other:
+                    transfer_started = True
+                return real_digest(path, *args, **kwargs)
+
+            with patch.object(Path, "stat", changed_mount), patch.object(backup, "digest", side_effect=digest_after_mount_change):
+                result = self.check()
+        self.assertEqual(result["status"], "critical")
+        self.assertFalse(result["replica"]["filesystemSeparated"])
+        self.assertIn("replica_uses_source_filesystem", result["issues"])
 
     def test_database_alone_never_reports_complete_protection(self):
         result = self.check(replica=False)

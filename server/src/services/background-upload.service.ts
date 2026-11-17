@@ -2,8 +2,9 @@ import { BadRequestException, GoneException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { copyFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import z from 'zod';
 import { StorageCore } from 'src/cores/storage.core.js';
-import { AssetMediaCreateDto, UploadFieldName } from 'src/dtos/asset-media.dto.js';
+import { UploadFieldName } from 'src/dtos/asset-media.dto.js';
 import { type AuthDto } from 'src/dtos/auth.dto.js';
 import { BackgroundUploadCreateDto } from 'src/dtos/background-upload.dto.js';
 import { DatabaseLock, StorageFolder } from 'src/enum.js';
@@ -12,6 +13,10 @@ import { AssetMediaService } from 'src/services/asset-media.service.js';
 import { type UploadFile } from 'src/types.js';
 import { BackgroundUploadStore } from 'src/utils/background-upload.js';
 import { fromChecksum } from 'src/utils/request.js';
+
+const StoredUploadMetadataSchema = BackgroundUploadCreateDto.schema
+  .omit({ checksum: true, size: true })
+  .extend({ isFavorite: z.boolean().optional() });
 
 @Injectable()
 export class BackgroundUploadService {
@@ -67,7 +72,7 @@ export class BackgroundUploadService {
       await store.reconcile(value);
       if (value.offset === value.size) {
         const original = await store.verify(value);
-        const metadata = AssetMediaCreateDto.schema.parse(value.metadata);
+        const metadata = StoredUploadMetadataSchema.parse(value.metadata);
         const file: UploadFile = {
           uuid: randomUUID(),
           checksum: Buffer.from(value.checksum, 'base64'),

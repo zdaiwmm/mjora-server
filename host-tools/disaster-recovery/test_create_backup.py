@@ -79,6 +79,63 @@ class CreateBackupTests(unittest.TestCase):
                 copy.create(self.source, self.dumps, self.destination, apply=True)
         self.assertEqual(list(self.destination.iterdir()), [])
 
+    def test_selected_folder_parent_symlink_is_refused_before_copy(self):
+        (self.source / "real" / "nested").mkdir(parents=True)
+        (self.source / "real" / "nested" / "photo.jpg").write_bytes(b"original")
+        (self.source / "alias").symlink_to(self.source / "real", target_is_directory=True)
+        with patch.object(copy, "validate_destination"):
+            with self.assertRaisesRegex(ValueError, "source_symlink"):
+                copy.create(self.source, self.dumps, self.destination, folders=["alias/nested"])
+        self.assertEqual(list(self.destination.iterdir()), [])
+
+    def apply_on_fixture_filesystem(self, folders):
+        real_check = copy.health.check
+
+        def same_fixture_filesystem(*args, **kwargs):
+            result = real_check(*args, **kwargs)
+            result["issues"] = [issue for issue in result["issues"] if issue != "replica_uses_source_filesystem"]
+            result["status"] = "critical" if result["issues"] else "ok"
+            return result
+
+        with patch.object(copy, "validate_destination"), patch.object(copy.health, "check", side_effect=same_fixture_filesystem):
+            return copy.create(self.source, self.dumps, self.destination, apply=True, folders=folders)
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required for the actual synthetic copy")
+    def test_nested_media_selection_preserves_relative_layout(self):
+        nested = self.source / "library" / "nested"
+        nested.mkdir(parents=True)
+        (nested / "photo.jpg").write_bytes(b"nested original")
+        result = self.apply_on_fixture_filesystem(["library/nested"])
+        snapshot = self.destination / result["snapshotName"]
+        self.assertEqual((snapshot / "library" / "nested" / "photo.jpg").read_bytes(), b"nested original")
+        self.assertFalse((snapshot / "nested").exists())
+        self.assertEqual(result["originalFiles"], 1)
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required for the actual synthetic copy")
+    def test_normalized_overlapping_selections_are_copied_and_counted_once(self):
+        nested = self.source / "upload" / "nested"
+        nested.mkdir()
+        (nested / "other.jpg").write_bytes(b"nested")
+        result = self.apply_on_fixture_filesystem(["./upload/", "upload", "upload/nested", "upload//nested/"])
+        snapshot = self.destination / result["snapshotName"]
+        self.assertEqual(result["originalFiles"], 2)
+        self.assertEqual(result["sourceBytes"], len(b"originalnested"))
+        self.assertEqual(sorted(str(path.relative_to(snapshot)) for path in snapshot.rglob("*.jpg")),
+                         ["upload/nested/other.jpg", "upload/photo.jpg"])
+        self.assertEqual(result["verification"]["replica"]["filesChecked"], 2)
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required for the actual synthetic copy")
+    def test_multiple_nested_directories_keep_distinct_parents(self):
+        for parent in ("library", "profile"):
+            folder = self.source / parent / "nested"
+            folder.mkdir(parents=True)
+            (folder / "same-name.jpg").write_bytes(parent.encode())
+        result = self.apply_on_fixture_filesystem(["library/nested/", "profile/nested/"])
+        snapshot = self.destination / result["snapshotName"]
+        for parent in ("library", "profile"):
+            self.assertEqual((snapshot / parent / "nested" / "same-name.jpg").read_bytes(), parent.encode())
+        self.assertEqual(result["originalFiles"], 2)
+
     @unittest.skipUnless(shutil.which("rsync"), "rsync is required for the actual synthetic copy")
     def test_apply_creates_verified_versions_without_overwriting_previous_copy(self):
         # Exercise actual local rsync; only mount independence is simulated for this synthetic fixture.
