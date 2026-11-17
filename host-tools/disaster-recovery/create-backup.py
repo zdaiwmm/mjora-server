@@ -3,6 +3,7 @@
 
 import argparse
 from datetime import datetime, timezone
+import errno
 import importlib.util
 import json
 import os
@@ -30,6 +31,7 @@ def validate_destination(source, backup_dir, destination, source_devices=()):
 
 
 def create(source, backup_dir, destination, apply=False, max_age_hours=36, folders=("upload", "library", "profile")):
+    folders = health.normalize_folders(folders)
     source, backup_dir, destination = (path.resolve(strict=True) for path in (source, backup_dir, destination))
     validate_destination(source, backup_dir, destination)
     database, issues, latest = health.database_check(backup_dir, max_age_hours, datetime.now().timestamp())
@@ -45,8 +47,12 @@ def create(source, backup_dir, destination, apply=False, max_age_hours=36, folde
         raise error
 
     for folder in selected:
-        if (source / folder).is_symlink():
-            raise ValueError("source_symlink_requires_explicit_mapping")
+        try:
+            health.checked_path(source, folder, source_devices)
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise ValueError("source_symlink_requires_explicit_mapping") from error
+            raise
         for parent, directories, files in os.walk(source / folder, onerror=failed_walk):
             source_devices.add(Path(parent).stat().st_dev)
             for name in [*directories, *files]:
@@ -73,7 +79,7 @@ def create(source, backup_dir, destination, apply=False, max_age_hours=36, folde
     (snapshot / "backups").mkdir(mode=0o700)
     result["snapshotName"] = snapshot.name
     try:
-        commands = [(["rsync", "--archive", "--ignore-existing", "--", *["./" + folder for folder in selected], str(snapshot) + "/"], source),
+        commands = [(["rsync", "--archive", "--relative", "--ignore-existing", "--", *["./" + folder for folder in selected], str(snapshot) + "/"], source),
                     (["rsync", "--archive", "--ignore-existing", "--", str(latest), str(snapshot / "backups") + "/"], None)]
         for command, cwd in commands:
             process = subprocess.run(command, cwd=cwd, capture_output=True, timeout=24 * 3600)
@@ -100,9 +106,12 @@ def main():
     parser.add_argument("--max-age-hours", type=float, default=36)
     parser.add_argument("--media-folder", action="append")
     args = parser.parse_args()
-    folders = args.media_folder or ["upload", "library", "profile"]
-    if args.max_age_hours <= 0 or any(Path(folder).is_absolute() or ".." in Path(folder).parts or folder in {"", "."} for folder in folders):
+    if args.max_age_hours <= 0:
         parser.error("Use a positive maximum age and relative media folders without '..'")
+    try:
+        folders = health.normalize_folders(args.media_folder or ["upload", "library", "profile"])
+    except ValueError as error:
+        parser.error(str(error))
     os.umask(0o077)
     try:
         result = create(args.source_root, args.backup_dir, args.destination, args.apply, args.max_age_hours, folders)

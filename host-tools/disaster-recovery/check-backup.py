@@ -3,6 +3,7 @@
 
 import argparse
 from datetime import datetime, timezone
+import errno
 import gzip
 import hashlib
 import json
@@ -70,9 +71,23 @@ def checked_path(root, relative, devices):
         path = path / part
         value = path.stat(follow_symlinks=False)
         if stat.S_ISLNK(value.st_mode):
-            raise OSError("Symlinks are not verified")
+            raise OSError(errno.ELOOP, "Symlinks are not verified")
         devices.add(value.st_dev)
     return path
+
+
+def normalize_folders(folders):
+    paths = set()
+    for folder in folders:
+        path = Path(folder)
+        if not path.parts or path.is_absolute() or ".." in path.parts:
+            raise ValueError("Use relative media folders without '..'")
+        paths.add(path)
+    selected = []
+    for path in sorted(paths, key=lambda item: (len(item.parts), item.as_posix())):
+        if not any(parent in path.parents for parent in selected):
+            selected.append(path)
+    return [path.as_posix() for path in selected]
 
 
 def compare_originals(source, replica, folders):
@@ -140,6 +155,7 @@ def compare_originals(source, replica, folders):
 
 
 def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload", "library", "profile"), now=None):
+    folders = normalize_folders(folders)
     now = time.time() if now is None else now
     database, issues, latest = database_check(backup_dir, max_age_hours, now)
     report = {"schemaVersion": 1, "checkedAt": datetime.fromtimestamp(now, timezone.utc).isoformat(),
@@ -188,9 +204,12 @@ def main():
     parser.add_argument("--max-age-hours", type=float, default=36)
     parser.add_argument("--media-folder", action="append", help="Relative original-file folder; repeat to replace defaults")
     args = parser.parse_args()
-    folders = args.media_folder or ["upload", "library", "profile"]
-    if args.max_age_hours <= 0 or any(Path(folder).is_absolute() or ".." in Path(folder).parts for folder in folders):
+    if args.max_age_hours <= 0:
         parser.error("Use a positive maximum age and relative media folders without '..'")
+    try:
+        folders = normalize_folders(args.media_folder or ["upload", "library", "profile"])
+    except ValueError as error:
+        parser.error(str(error))
     report = check(args.source_root, args.backup_dir, args.replica_root, args.max_age_hours, folders)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0 if report["status"] == "ok" else 1
