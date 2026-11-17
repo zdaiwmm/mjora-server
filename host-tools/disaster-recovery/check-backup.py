@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import time
 import zlib
 
@@ -19,8 +20,8 @@ def digest(path):
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             value.update(chunk)
     after = path.stat()
-    if (before.st_ino, before.st_size, before.st_mtime_ns) != (
-        after.st_ino, after.st_size, after.st_mtime_ns
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+        after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
     ):
         raise OSError("File changed while being checked")
     return value.hexdigest(), after.st_size
@@ -60,11 +61,26 @@ def database_check(directory, max_age_hours, now):
         return result, issues + ["database_backup_unreadable_or_corrupt"], None
 
 
+def checked_path(root, relative, devices):
+    relative = Path(relative)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise OSError("Path leaves the checked root")
+    path = root
+    for part in relative.parts:
+        path = path / part
+        value = path.stat(follow_symlinks=False)
+        if stat.S_ISLNK(value.st_mode):
+            raise OSError("Symlinks are not verified")
+        devices.add(value.st_dev)
+    return path
+
+
 def compare_originals(source, replica, folders):
     result = {"filesChecked": 0, "bytesChecked": 0, "missingFiles": 0,
               "mismatchedFiles": 0, "unreadableFiles": 0}
     found_root = False
     source_devices = set()
+    replica_devices = set()
 
     def failed_walk(_error):
         result["unreadableFiles"] += 1
@@ -74,12 +90,20 @@ def compare_originals(source, replica, folders):
         if not origin.exists():
             continue
         found_root = True
-        if origin.is_symlink() or not origin.is_dir():
+        try:
+            checked_path(source, folder, source_devices)
+            if not origin.is_dir():
+                raise OSError("Original folder is not a directory")
+        except OSError:
             result["unreadableFiles"] += 1
             continue
         source_devices.add(origin.stat().st_dev)
         for parent, directories, files in os.walk(origin, onerror=failed_walk):
             source_devices.add(Path(parent).stat().st_dev)
+            try:
+                checked_path(replica, Path(parent).relative_to(source), replica_devices)
+            except OSError:
+                result["unreadableFiles"] += 1
             for name in list(directories):
                 directory = Path(parent) / name
                 if directory.is_symlink():
@@ -90,13 +114,13 @@ def compare_originals(source, replica, folders):
             for name in files:
                 path = Path(parent) / name
                 relative = path.relative_to(source)
-                other = replica / relative
                 try:
-                    if path.is_symlink() or any(replica.joinpath(*relative.parts[:index]).is_symlink()
-                                                for index in range(1, len(relative.parts) + 1)):
+                    if path.is_symlink():
                         raise OSError("Symlinks are not verified")
                     source_devices.add(path.stat().st_dev)
-                    if not other.exists():
+                    try:
+                        other = checked_path(replica, relative, replica_devices)
+                    except FileNotFoundError:
                         result["missingFiles"] += 1
                         continue
                     first, size = digest(path)
@@ -112,7 +136,7 @@ def compare_originals(source, replica, folders):
         issues.append("source_original_folders_missing")
     if result["missingFiles"] or result["mismatchedFiles"] or result["unreadableFiles"]:
         issues.append("original_replica_incomplete_or_changed")
-    return result, issues, source_devices
+    return result, issues, source_devices, replica_devices
 
 
 def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload", "library", "profile"), now=None):
@@ -129,20 +153,26 @@ def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload",
             if source == replica or source in replica.parents or replica in source.parents:
                 issues.append("source_and_replica_overlap")
             else:
-                files, media_issues, source_devices = compare_originals(source, replica, folders)
+                files, media_issues, source_devices, replica_devices = compare_originals(source, replica, folders)
                 source_devices.update({source.stat().st_dev, backup_dir.stat().st_dev})
+                replica_devices.add(replica.stat().st_dev)
                 if latest is not None:
                     source_devices.add(latest.stat().st_dev)
-                separate = replica.stat().st_dev not in source_devices
-                report["replica"]["filesystemSeparated"] = separate
-                if not separate:
-                    issues.append("replica_uses_source_filesystem")
                 report["replica"].update(files)
                 issues.extend(media_issues)
+                database_verified = False
                 if latest is not None:
-                    copy = replica / "backups" / latest.name
-                    if copy.is_symlink() or not copy.is_file() or digest(copy)[0] != database.get("sha256"):
+                    try:
+                        copy = checked_path(replica, Path("backups") / latest.name, replica_devices)
+                        database_verified = copy.is_file() and digest(copy)[0] == database.get("sha256")
+                    except OSError:
+                        pass
+                    if not database_verified:
                         issues.append("database_replica_missing_or_changed")
+                shared = bool(source_devices & replica_devices)
+                report["replica"]["filesystemSeparated"] = not shared and not media_issues and database_verified
+                if shared:
+                    issues.append("replica_uses_source_filesystem")
         except OSError:
             issues.append("replica_or_source_unavailable")
     report["issues"] = sorted(set(issues))

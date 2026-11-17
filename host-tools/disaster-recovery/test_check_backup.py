@@ -49,7 +49,7 @@ class BackupCheckTests(unittest.TestCase):
     def independent_replica(self, source_mounts=()):
         """Model device numbers only; paths, file contents and symlinks are real."""
         replica = self.replica.resolve()
-        source_mounts = tuple(path.absolute() for path in source_mounts)
+        source_mounts = tuple(path.resolve() for path in source_mounts)
         real_stat = Path.stat
 
         def mounted_stat(path, *args, **kwargs):
