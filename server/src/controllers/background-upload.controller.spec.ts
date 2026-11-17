@@ -70,11 +70,11 @@ describe('background upload HTTP contract', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it('validates JSON once, stages binary without an account credential and imports only through authenticated status', async () => {
+  it.each([undefined, false, true])('validates JSON once and imports authenticated favorite=%s', async (favorite) => {
     const opened = await request(app.getHttpServer())
       .post('/api/assets/background-uploads')
       .set('Authorization', 'Bearer synthetic-fixture')
-      .send(metadata)
+      .send({ ...metadata, ...(favorite === undefined ? {} : { isFavorite: String(favorite) }) })
       .expect(201);
     expect(opened.headers['cache-control']).toBe('no-store');
     const state = opened.body;
@@ -98,9 +98,15 @@ describe('background upload HTTP contract', () => {
     const imported = assets.uploadAsset.mock.calls[0][2] as UploadFile;
     const bytes = await readFile(imported.originalPath);
     expect(bytes.equals(data)).toBe(true);
+    expect(assets.uploadAsset.mock.calls[0][1].isFavorite).toBe(favorite);
   });
 
   it('rejects invalid metadata before allocating staging and rejects missing staging capabilities', async () => {
+    await request(app.getHttpServer())
+      .post('/api/assets/background-uploads')
+      .set('Authorization', 'Bearer synthetic-fixture')
+      .send({ ...metadata, isFavorite: false })
+      .expect(400);
     await request(app.getHttpServer())
       .post('/api/assets/background-uploads')
       .set('Authorization', 'Bearer synthetic-fixture')
