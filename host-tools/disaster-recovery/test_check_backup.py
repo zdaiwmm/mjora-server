@@ -144,6 +144,32 @@ class BackupCheckTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 backup.digest(self.photo)
 
+    def test_replica_mount_change_before_hashing_is_not_missed(self):
+        other = (self.replica / "upload" / self.photo.name).resolve()
+        transfer_started = False
+        real_digest = backup.digest
+        with self.independent_replica():
+            model_stat = Path.stat
+
+            def changed_mount(path, *args, **kwargs):
+                value = model_stat(path, *args, **kwargs)
+                if Path(path) == other and transfer_started:
+                    return SimpleNamespace(**{key: 1 if key == "st_dev" else getattr(value, key)
+                                              for key in dir(value) if key.startswith("st_")})
+                return value
+
+            def digest_after_mount_change(path, *args, **kwargs):
+                nonlocal transfer_started
+                if path == other:
+                    transfer_started = True
+                return real_digest(path, *args, **kwargs)
+
+            with patch.object(Path, "stat", changed_mount), patch.object(backup, "digest", side_effect=digest_after_mount_change):
+                result = self.check()
+        self.assertEqual(result["status"], "critical")
+        self.assertFalse(result["replica"]["filesystemSeparated"])
+        self.assertIn("replica_uses_source_filesystem", result["issues"])
+
     def test_database_alone_never_reports_complete_protection(self):
         result = self.check(replica=False)
         self.assertEqual(result["status"], "critical")
