@@ -14,13 +14,17 @@ import time
 import zlib
 
 
-def digest(path):
+def digest(path, devices=None):
     before = path.stat()
+    if devices is not None:
+        devices.add(before.st_dev)
     value = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             value.update(chunk)
     after = path.stat()
+    if devices is not None:
+        devices.add(after.st_dev)
     if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
         after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
     ):
@@ -28,7 +32,7 @@ def digest(path):
     return value.hexdigest(), after.st_size
 
 
-def database_check(directory, max_age_hours, now):
+def database_check(directory, max_age_hours, now, devices=None):
     result = {"present": False}
     issues = []
     try:
@@ -53,7 +57,7 @@ def database_check(directory, max_age_hours, now):
         result["gzipIntegrity"] = True
         result["dumpHeader"] = b"PostgreSQL database dump" in header
         result["decompressedBytes"] = total
-        result["sha256"], result["compressedBytes"] = digest(latest)
+        result["sha256"], result["compressedBytes"] = digest(latest, devices)
         if not result["dumpHeader"]:
             issues.append("database_dump_header_missing")
         return result, issues, latest
@@ -138,8 +142,8 @@ def compare_originals(source, replica, folders):
                     except FileNotFoundError:
                         result["missingFiles"] += 1
                         continue
-                    first, size = digest(path)
-                    second, other_size = digest(other)
+                    first, size = digest(path, source_devices)
+                    second, other_size = digest(other, replica_devices)
                     result["filesChecked"] += 1
                     result["bytesChecked"] += size
                     if first != second or size != other_size:
@@ -157,7 +161,8 @@ def compare_originals(source, replica, folders):
 def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload", "library", "profile"), now=None):
     folders = normalize_folders(folders)
     now = time.time() if now is None else now
-    database, issues, latest = database_check(backup_dir, max_age_hours, now)
+    source_devices = set()
+    database, issues, latest = database_check(backup_dir, max_age_hours, now, source_devices)
     report = {"schemaVersion": 1, "checkedAt": datetime.fromtimestamp(now, timezone.utc).isoformat(),
               "scope": "database archive and current original-file comparison",
               "database": database, "replica": {"configured": replica is not None}}
@@ -169,7 +174,8 @@ def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload",
             if source == replica or source in replica.parents or replica in source.parents:
                 issues.append("source_and_replica_overlap")
             else:
-                files, media_issues, source_devices, replica_devices = compare_originals(source, replica, folders)
+                files, media_issues, media_devices, replica_devices = compare_originals(source, replica, folders)
+                source_devices.update(media_devices)
                 source_devices.update({source.stat().st_dev, backup_dir.stat().st_dev})
                 replica_devices.add(replica.stat().st_dev)
                 if latest is not None:
@@ -180,7 +186,7 @@ def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload",
                 if latest is not None:
                     try:
                         copy = checked_path(replica, Path("backups") / latest.name, replica_devices)
-                        database_verified = copy.is_file() and digest(copy)[0] == database.get("sha256")
+                        database_verified = copy.is_file() and digest(copy, replica_devices)[0] == database.get("sha256")
                     except OSError:
                         pass
                     if not database_verified:

@@ -34,14 +34,15 @@ def create(source, backup_dir, destination, apply=False, max_age_hours=36, folde
     folders = health.normalize_folders(folders)
     source, backup_dir, destination = (path.resolve(strict=True) for path in (source, backup_dir, destination))
     validate_destination(source, backup_dir, destination)
-    database, issues, latest = health.database_check(backup_dir, max_age_hours, datetime.now().timestamp())
+    source_devices = set()
+    database, issues, latest = health.database_check(backup_dir, max_age_hours, datetime.now().timestamp(), source_devices)
     if issues:
         raise ValueError(",".join(issues))
     selected = [folder for folder in folders if (source / folder).is_dir()]
     if not selected:
         raise ValueError("source_original_folders_missing")
     count = total = 0
-    source_devices = {latest.stat().st_dev}
+    source_devices.add(latest.stat().st_dev)
 
     def failed_walk(error):
         raise error

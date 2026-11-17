@@ -118,10 +118,10 @@ class BackupCheckTests(unittest.TestCase):
         other = (self.replica / "upload" / self.photo.name).resolve()
         real_digest = backup.digest
 
-        def unreadable(path):
+        def unreadable(path, *args, **kwargs):
             if path == other:
                 raise PermissionError("synthetic denial")
-            return real_digest(path)
+            return real_digest(path, *args, **kwargs)
 
         with self.independent_replica(), patch.object(backup, "digest", side_effect=unreadable):
             result = self.check()
