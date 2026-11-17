@@ -7,7 +7,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("check-backup.py")
@@ -52,6 +54,30 @@ class BackupCheckTests(unittest.TestCase):
         self.assertEqual(result["issues"], ["replica_uses_source_filesystem"])
         self.assertEqual(result["replica"]["filesChecked"], 1)
         self.assertEqual(result["replica"]["mismatchedFiles"], 0)
+
+    def test_nested_original_mount_sharing_replica_filesystem_is_critical(self):
+        nested = self.source / "library" / "mounted"
+        nested.mkdir(parents=True)
+        original = nested / "photo.jpg"
+        original.write_bytes(b"nested original")
+        other = self.replica / "library" / "mounted" / original.name
+        other.parent.mkdir(parents=True)
+        other.write_bytes(original.read_bytes())
+        replica, mounted, file = (path.resolve() for path in (self.replica, nested, original))
+        real_stat = Path.stat
+        for kind in ("directory", "file"):
+            with self.subTest(kind=kind):
+                def mounted_stat(path, *args, **kwargs):
+                    stat = real_stat(path, *args, **kwargs)
+                    canonical = Path(os.path.realpath(path))
+                    shared = (canonical == mounted or mounted in canonical.parents) if kind == "directory" else canonical == file
+                    device = 2 if canonical == replica or replica in canonical.parents or shared else 1
+                    return SimpleNamespace(**{key: device if key == "st_dev" else getattr(stat, key)
+                                              for key in dir(stat) if key.startswith("st_")})
+                with patch.object(Path, "stat", mounted_stat):
+                    result = self.check()
+                self.assertFalse(result["replica"]["filesystemSeparated"])
+                self.assertEqual(result["issues"], ["replica_uses_source_filesystem"])
 
     def test_stale_dump_is_detected(self):
         timestamp = time.time() - 48 * 3600

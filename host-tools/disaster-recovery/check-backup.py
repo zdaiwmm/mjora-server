@@ -64,6 +64,7 @@ def compare_originals(source, replica, folders):
     result = {"filesChecked": 0, "bytesChecked": 0, "missingFiles": 0,
               "mismatchedFiles": 0, "unreadableFiles": 0}
     found_root = False
+    source_devices = set()
 
     def failed_walk(_error):
         result["unreadableFiles"] += 1
@@ -76,11 +77,16 @@ def compare_originals(source, replica, folders):
         if origin.is_symlink() or not origin.is_dir():
             result["unreadableFiles"] += 1
             continue
+        source_devices.add(origin.stat().st_dev)
         for parent, directories, files in os.walk(origin, onerror=failed_walk):
+            source_devices.add(Path(parent).stat().st_dev)
             for name in list(directories):
-                if (Path(parent) / name).is_symlink():
+                directory = Path(parent) / name
+                if directory.is_symlink():
                     directories.remove(name)
                     result["unreadableFiles"] += 1
+                else:
+                    source_devices.add(directory.stat().st_dev)
             for name in files:
                 path = Path(parent) / name
                 relative = path.relative_to(source)
@@ -89,6 +95,7 @@ def compare_originals(source, replica, folders):
                     if path.is_symlink() or any(replica.joinpath(*relative.parts[:index]).is_symlink()
                                                 for index in range(1, len(relative.parts) + 1)):
                         raise OSError("Symlinks are not verified")
+                    source_devices.add(path.stat().st_dev)
                     if not other.exists():
                         result["missingFiles"] += 1
                         continue
@@ -105,7 +112,7 @@ def compare_originals(source, replica, folders):
         issues.append("source_original_folders_missing")
     if result["missingFiles"] or result["mismatchedFiles"] or result["unreadableFiles"]:
         issues.append("original_replica_incomplete_or_changed")
-    return result, issues
+    return result, issues, source_devices
 
 
 def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload", "library", "profile"), now=None):
@@ -122,11 +129,14 @@ def check(source, backup_dir, replica=None, max_age_hours=36, folders=("upload",
             if source == replica or source in replica.parents or replica in source.parents:
                 issues.append("source_and_replica_overlap")
             else:
-                separate = replica.stat().st_dev not in {source.stat().st_dev, backup_dir.stat().st_dev}
+                files, media_issues, source_devices = compare_originals(source, replica, folders)
+                source_devices.update({source.stat().st_dev, backup_dir.stat().st_dev})
+                if latest is not None:
+                    source_devices.add(latest.stat().st_dev)
+                separate = replica.stat().st_dev not in source_devices
                 report["replica"]["filesystemSeparated"] = separate
                 if not separate:
                     issues.append("replica_uses_source_filesystem")
-                files, media_issues = compare_originals(source, replica, folders)
                 report["replica"].update(files)
                 issues.extend(media_issues)
                 if latest is not None:

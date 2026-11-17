@@ -1,9 +1,11 @@
 import gzip
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -32,6 +34,28 @@ class CreateBackupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "destination_uses_source_filesystem"):
             copy.create(self.source, self.dumps, self.destination, apply=True)
         self.assertEqual(list(self.destination.iterdir()), [])
+
+    def test_nested_original_mount_sharing_destination_is_refused_before_writing(self):
+        nested = self.source / "library" / "mounted"
+        nested.mkdir(parents=True)
+        original = nested / "photo.jpg"
+        original.write_bytes(b"nested original")
+        destination, mounted, file = (path.resolve() for path in (self.destination, nested, original))
+        real_stat = Path.stat
+        for kind in ("directory", "file"):
+            with self.subTest(kind=kind):
+                def mounted_stat(path, *args, **kwargs):
+                    stat = real_stat(path, *args, **kwargs)
+                    canonical = Path(os.path.realpath(path))
+                    shared = (canonical == mounted or mounted in canonical.parents) if kind == "directory" else canonical == file
+                    device = 2 if canonical == destination or destination in canonical.parents or shared else 1
+                    return SimpleNamespace(**{key: device if key == "st_dev" else getattr(stat, key)
+                                              for key in dir(stat) if key.startswith("st_")})
+                with patch.object(Path, "stat", mounted_stat), patch.object(copy.subprocess, "run") as run:
+                    with self.assertRaisesRegex(ValueError, "destination_uses_source_filesystem"):
+                        copy.create(self.source, self.dumps, self.destination)
+                self.assertEqual(list(self.destination.iterdir()), [])
+                run.assert_not_called()
 
     def test_overlapping_destination_is_refused(self):
         nested = self.source / "nested"

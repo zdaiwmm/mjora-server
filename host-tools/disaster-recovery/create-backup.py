@@ -17,7 +17,7 @@ health = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(health)
 
 
-def validate_destination(source, backup_dir, destination):
+def validate_destination(source, backup_dir, destination, source_devices=()):
     for origin in (source, backup_dir):
         if origin == destination or origin in destination.parents or destination in origin.parents:
             raise ValueError("source_and_destination_overlap")
@@ -25,6 +25,8 @@ def validate_destination(source, backup_dir, destination):
             raise ValueError("destination_uses_source_filesystem")
     if not source.is_dir() or not backup_dir.is_dir() or not destination.is_dir():
         raise ValueError("source_or_destination_is_not_a_directory")
+    if destination.stat().st_dev in source_devices:
+        raise ValueError("destination_uses_source_filesystem")
 
 
 def create(source, backup_dir, destination, apply=False, max_age_hours=36, folders=("upload", "library", "profile")):
@@ -37,6 +39,7 @@ def create(source, backup_dir, destination, apply=False, max_age_hours=36, folde
     if not selected:
         raise ValueError("source_original_folders_missing")
     count = total = 0
+    source_devices = {latest.stat().st_dev}
 
     def failed_walk(error):
         raise error
@@ -45,12 +48,16 @@ def create(source, backup_dir, destination, apply=False, max_age_hours=36, folde
         if (source / folder).is_symlink():
             raise ValueError("source_symlink_requires_explicit_mapping")
         for parent, directories, files in os.walk(source / folder, onerror=failed_walk):
+            source_devices.add(Path(parent).stat().st_dev)
             for name in [*directories, *files]:
-                if (Path(parent) / name).is_symlink():
+                path = Path(parent) / name
+                if path.is_symlink():
                     raise ValueError("source_symlink_requires_explicit_mapping")
+                source_devices.add(path.stat().st_dev)
             for name in files:
                 total += (Path(parent) / name).stat().st_size
                 count += 1
+    validate_destination(source, backup_dir, destination, source_devices)
     if shutil.disk_usage(destination).free < total + database["compressedBytes"] + 64 * 1024 * 1024:
         raise ValueError("insufficient_destination_space")
     result = {"mode": "apply" if apply else "plan", "originalFiles": count,
