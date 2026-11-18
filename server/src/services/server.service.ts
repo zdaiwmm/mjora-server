@@ -103,6 +103,7 @@ export class ServerService extends BaseService {
     return {
       backgroundUploadsV1: true,
       photoEditsV1: true,
+      photoEditsCASV1: true,
       smartSearch: isSmartSearchEnabled(machineLearning),
       facialRecognition: isFacialRecognitionEnabled(machineLearning),
       duplicateDetection: isDuplicateDetectionEnabled(machineLearning),

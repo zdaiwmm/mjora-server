@@ -152,4 +152,7 @@ export class AssetTable {
 
   @Column({ type: 'boolean', default: false })
   isEdited!: Generated<boolean>;
+
+  @Column({ type: 'uuid', nullable: true })
+  editRevision!: string | null;
 }

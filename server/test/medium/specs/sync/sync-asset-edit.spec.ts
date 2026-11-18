@@ -123,12 +123,16 @@ describe(SyncRequestType.AssetEditsV1, () => {
     const assetEditRepo = ctx.get(AssetEditRepository);
 
     // Create initial edit
-    const edits = await assetEditRepo.replaceAll(asset.id, [
+    const write = await assetEditRepo.replaceAll(asset.id, [
       {
         action: AssetEditAction.Crop,
         parameters: { x: 10, y: 20, width: 100, height: 200 },
       },
     ]);
+    if (write.status !== 'committed') {
+      throw new Error('Could not save initial edit');
+    }
+    const { edits } = write.snapshot;
 
     const response1 = await ctx.syncStream(auth, [SyncRequestType.AssetEditsV1]);
     await ctx.syncAckAll(auth, response1);
@@ -171,12 +175,16 @@ describe(SyncRequestType.AssetEditsV1, () => {
     const assetEditRepo = ctx.get(AssetEditRepository);
 
     // Create initial edit
-    const edits = await assetEditRepo.replaceAll(asset.id, [
+    const write = await assetEditRepo.replaceAll(asset.id, [
       {
         action: AssetEditAction.Crop,
         parameters: { x: 10, y: 20, width: 100, height: 200 },
       },
     ]);
+    if (write.status !== 'committed') {
+      throw new Error('Could not save initial edit');
+    }
+    const { edits } = write.snapshot;
 
     const response1 = await ctx.syncStream(auth, [SyncRequestType.AssetEditsV1]);
     await ctx.syncAckAll(auth, response1);

@@ -14,6 +14,7 @@ mjora 的服务端开发仓库，由 [Immich](https://github.com/immich-app/immi
 - [deploy/web/](deploy/web/README.md)：在固定服务端版本上更新 Web 静态资源的候选镜像配方。
 - [host-tools/update-host/](host-tools/update-host/README.md)：运行于配对 Mac 的 HTTPS 更新服务；App 确认后才安装固定签名包，与 Ubuntu 照片服务分开。
 - [host-tools/disaster-recovery/](host-tools/disaster-recovery/README.md)：数据库与原片副本的只读检查、默认预演的版本复制工具，以及隔离恢复演练说明。
+- [host-tools/predeploy/](host-tools/predeploy/README.md)：上线前复制并验证当前运行版本的 Compose 和环境配置；验证失败则停止切换。
 
 `mjora` 分支移除了手机端的 `mobile/`、`native/`、`fastlane/`，以及继承的自动构建发布任务。仓库保留服务端镜像需要的构建依赖。实际家庭配置、账号、照片、证书及私钥保存在部署环境中。
 
@@ -42,15 +43,15 @@ git switch -c update/immich-vX.Y.Z
 git merge --no-ff --no-commit vX.Y.Z
 ```
 
-把 `vX.Y.Z` 替换为已审阅的目标版本。处理冲突时保留自己的说明和网关模板，并检查上游构建依赖是否变化。上游新增的手机端文件或工作流可能直接合并成功，因此每次合并后、提交前，还要显式移除这些路径并确认检查结果为空：
+把 `vX.Y.Z` 替换为已审阅的目标版本。处理冲突时保留自己的说明和网关模板，并检查上游构建依赖是否变化。上游新增的手机端文件或工作流可能直接合并成功，因此每次合并后、提交前，还要显式移除这些路径（保留 mjora 的回归工作流）并确认检查结果为空：
 
 ```sh
-git rm -r --sparse --ignore-unmatch mobile native fastlane .github/workflows CODEOWNERS
-git ls-files mobile native fastlane .github/workflows CODEOWNERS
+git rm -r --sparse --ignore-unmatch -- mobile native fastlane .github/workflows CODEOWNERS ':(exclude).github/workflows/regression.yml'
+git ls-files -- mobile native fastlane .github/workflows CODEOWNERS ':(exclude).github/workflows/regression.yml'
 git diff --cached --name-status
 ```
 
-随后验证依赖、镜像和测试，审阅数据库迁移及恢复方式，再提交并合并到 `mjora`。生产升级另行安排；本仓库没有自动部署生产环境的任务。
+随后验证依赖、镜像和测试，审阅数据库迁移及恢复方式，再提交并合并到 `mjora`。[回归 CI](.github/workflows/regression.yml) 在干净检出中校验待合并或已合并的实际提交，跑类型检查、服务端单测、独立 PostgreSQL 的照片编辑仓库测试和运维工具测试。每个合并请求和手动运行还会在独立容器环境中对候选镜像运行 Asset HTTP 测试。以候选 SHA 对应的回归结果为准；生产升级另行安排，切换前须完成[发布前配置备份](host-tools/predeploy/README.md)。本仓库没有自动部署生产环境的任务。
 
 ## 本次验证范围
 

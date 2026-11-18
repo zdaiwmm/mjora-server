@@ -1,0 +1,123 @@
+name: Server regression
+
+on:
+  pull_request:
+    branches: [mjora]
+  push:
+    branches: [mjora]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TEST_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  server:
+    name: Server type check and regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TEST_SHA }}
+          persist-credentials: false
+      - name: Verify checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$TEST_SHA"
+          test -z "$(git status --porcelain)"
+          printf 'Source: %s\n' "$TEST_SHA"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+        with:
+          run_install: false
+      - name: Install locked server dependencies and build workspace packages
+        run: |
+          node --version
+          test "pnpm@$(pnpm --version)" = "$(node -p 'require("./package.json").packageManager')"
+          pnpm --filter @immich/sdk install --frozen-lockfile
+          pnpm --filter @immich/sdk build
+          pnpm --filter @immich/plugin-sdk install --frozen-lockfile
+          pnpm --filter @immich/plugin-sdk build
+          pnpm --filter immich install --frozen-lockfile
+      - name: Type check
+        run: pnpm --filter immich check
+      - name: Run server unit tests
+        run: pnpm --filter immich test --run
+      - name: Run asset-edit repository tests in isolated PostgreSQL
+        run: pnpm --filter immich test:medium --run test/medium/specs/repositories/asset-edit.repository.spec.ts
+
+  host-tools:
+    name: Host tool tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TEST_SHA }}
+          persist-credentials: false
+      - name: Verify checkout and test host tools
+        run: |
+          test "$(git rev-parse HEAD)" = "$TEST_SHA"
+          test -z "$(git status --porcelain)"
+          printf 'Source: %s\n' "$TEST_SHA"
+          python3 --version
+          for tool in disaster-recovery predeploy update-host; do
+            python3 -B -m unittest discover -s "host-tools/$tool" -p 'test_*.py'
+          done
+
+  asset-api:
+    name: Asset HTTP tests against the candidate image
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TEST_SHA }}
+          submodules: true
+          persist-credentials: false
+      - name: Verify checkout including test fixtures
+        run: |
+          test "$(git rev-parse HEAD)" = "$TEST_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(git -C e2e/test-assets rev-parse HEAD)" = "$(git rev-parse HEAD:e2e/test-assets)"
+          printf 'Source: %s\n' "$TEST_SHA"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+        with:
+          run_install: false
+      - name: Install locked API test dependencies
+        run: |
+          test "pnpm@$(pnpm --version)" = "$(node -p 'require("./package.json").packageManager')"
+          pnpm --filter @immich/sdk install --frozen-lockfile
+          pnpm --filter @immich/sdk build
+          pnpm --filter @immich/cli install --frozen-lockfile
+          pnpm --filter @immich/cli build
+          pnpm --filter immich-e2e... install --frozen-lockfile
+      - name: Build and start an isolated stack for this commit
+        working-directory: e2e
+        run: |
+          docker compose build --build-arg "BUILD_SOURCE_COMMIT=$TEST_SHA"
+          docker compose up -d --no-build
+          curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused --max-time 5 \
+            http://127.0.0.1:2285/api/server/ping
+      - name: Run asset API tests
+        env:
+          VITEST_DISABLE_DOCKER_SETUP: 'true'
+        run: |
+          cp .github/tests/asset-edit-version.e2e-spec.ts e2e/src/specs/server/api/
+          pnpm --filter immich-e2e test src/specs/server/api/asset.e2e-spec.ts src/specs/server/api/asset-edit-version.e2e-spec.ts
+      - name: Collect stack logs and remove the test containers
+        if: ${{ always() }}
+        working-directory: e2e
+        run: |
+          docker compose logs --no-color --tail 80 || true
+          docker compose down --volumes --remove-orphans
