@@ -319,12 +319,12 @@ describe(AssetController.name, () => {
       ];
 
       const assetId = factory.uuid();
-      const { status } = await request(ctx.getHttpServer()).put(`/assets/${assetId}/edits`).send({
-        edits,
-      });
+      service.editAsset.mockResolvedValue({ edits: [], etag: '"revision"' });
+      const { status, body } = await request(ctx.getHttpServer()).put(`/assets/${assetId}/edits`).send({ edits });
 
       expect(service.editAsset).toHaveBeenCalledWith(undefined, assetId, { edits });
       expect(status).toBe(200);
+      expect(body).toEqual({ assetId, edits: [] });
     });
 
     it('should require a valid id', async () => {
@@ -386,6 +386,51 @@ describe(AssetController.name, () => {
           { path: ['edits'], message: 'Too small: expected array to have >=1 items' },
         ]),
       );
+    });
+  });
+
+  describe('versioned asset edits', () => {
+    const tag = '"revision"';
+    const nextTag = '"next-revision"';
+    const edits = [{ action: 'rotate', parameters: { angle: 90 } }];
+
+    it('returns the current snapshot and a noncacheable strong tag on GET', async () => {
+      const assetId = factory.uuid();
+      service.getAssetEdits.mockResolvedValue({ edits: [], etag: tag });
+
+      const { status, body, headers } = await request(ctx.getHttpServer()).get(`/assets/${assetId}/edits`);
+
+      expect(status).toBe(200);
+      expect(body).toEqual({ assetId, edits: [] });
+      expect(headers).toMatchObject({ etag: tag, 'cache-control': 'no-store' });
+    });
+
+    it('requires a precondition for both write methods and rejects wildcard, weak and list tags', async () => {
+      const endpoint = `/assets/${factory.uuid()}/edits/versioned`;
+      await request(ctx.getHttpServer()).put(endpoint).send({ edits }).expect(428);
+      await request(ctx.getHttpServer()).delete(endpoint).expect(428);
+      for (const invalid of ['*', `W/${tag}`, `${tag}, ${nextTag}`]) {
+        await request(ctx.getHttpServer()).delete(endpoint).set('If-Match', invalid).expect(400);
+      }
+      expect(service.editAsset).not.toHaveBeenCalled();
+      expect(service.removeAssetEdits).not.toHaveBeenCalled();
+    });
+
+    it('passes the precondition through and returns the new tag on PUT and DELETE', async () => {
+      const assetId = factory.uuid();
+      const endpoint = `/assets/${assetId}/edits/versioned`;
+      service.editAsset.mockResolvedValue({ edits: [], etag: nextTag });
+      service.removeAssetEdits.mockResolvedValue({ edits: [], etag: nextTag });
+
+      await request(ctx.getHttpServer())
+        .put(endpoint)
+        .set('If-Match', tag)
+        .send({ edits })
+        .expect(200, { assetId, edits: [] })
+        .expect('ETag', nextTag);
+      await request(ctx.getHttpServer()).delete(endpoint).set('If-Match', tag).expect(204).expect('ETag', nextTag);
+      expect(service.editAsset).toHaveBeenCalledWith(undefined, assetId, { edits }, tag);
+      expect(service.removeAssetEdits).toHaveBeenCalledWith(undefined, assetId, tag);
     });
   });
 

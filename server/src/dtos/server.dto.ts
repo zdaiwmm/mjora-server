@@ -139,6 +139,7 @@ const ServerFeaturesSchema = z
   .object({
     backgroundUploadsV1: z.boolean().optional().describe('Encrypted resumable background upload staging'),
     photoEditsV1: z.boolean().describe('Whether whole-intent photo editor v1 color and geometry actions are supported'),
+    photoEditsCASV1: z.boolean().optional().describe('Whether versioned photo edit writes require an edit ETag'),
     smartSearch: z.boolean().describe('Whether smart search is enabled'),
     duplicateDetection: z.boolean().describe('Whether duplicate detection is enabled'),
     configFile: z.boolean().describe('Whether config file is available'),

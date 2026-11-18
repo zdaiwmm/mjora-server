@@ -1,5 +1,23 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  Headers,
+  HttpCode,
+  HttpException,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { Endpoint, HistoryBuilder } from 'src/decorators.js';
 import { AssetResponseDto } from 'src/dtos/asset-response.dto.js';
 import {
@@ -24,6 +42,17 @@ import { ApiTag, Permission, RouteKey } from 'src/enum.js';
 import { Auth, Authenticated } from 'src/middleware/auth.guard.js';
 import { AssetService } from 'src/services/asset.service.js';
 import { UUIDParamDto } from 'src/validation.js';
+
+const requireEditETag = (ifMatch: string | undefined) => {
+  if (ifMatch === undefined) {
+    throw new HttpException('If-Match is required', HttpStatus.PRECONDITION_REQUIRED);
+  }
+  // Only one strong tag is accepted. Wildcard and list matching would permit an unintended overwrite.
+  if (!/^"[^"\s,]+"$/.test(ifMatch)) {
+    throw new BadRequestException('If-Match must be a single strong ETag');
+  }
+  return ifMatch;
+};
 
 @ApiTags(ApiTag.Assets)
 @Controller(RouteKey.Asset)
@@ -225,13 +254,20 @@ export class AssetController {
 
   @Get(':id/edits')
   @Authenticated({ permission: Permission.AssetEditGet })
+  @Header('Cache-Control', 'no-store')
   @Endpoint({
     summary: 'Retrieve edits for an existing asset',
     description: 'Retrieve a series of edit actions (crop, rotate, mirror) associated with the specified asset.',
     history: new HistoryBuilder().added('v2.5.0').beta('v2.5.0'),
   })
-  getAssetEdits(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<AssetEditsResponseDto> {
-    return this.service.getAssetEdits(auth, id);
+  async getAssetEdits(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AssetEditsResponseDto> {
+    const { edits, etag } = await this.service.getAssetEdits(auth, id);
+    response.setHeader('ETag', etag);
+    return { assetId: id, edits };
   }
 
   @Put(':id/edits')
@@ -241,12 +277,13 @@ export class AssetController {
     description: 'Apply a series of edit actions (crop, rotate, mirror) to the specified asset.',
     history: new HistoryBuilder().added('v2.5.0').beta('v2.5.0'),
   })
-  editAsset(
+  async editAsset(
     @Auth() auth: AuthDto,
     @Param() { id }: UUIDParamDto,
     @Body() dto: AssetEditsCreateDto,
   ): Promise<AssetEditsResponseDto> {
-    return this.service.editAsset(auth, id, dto);
+    const { edits } = await this.service.editAsset(auth, id, dto);
+    return { assetId: id, edits };
   }
 
   @Delete(':id/edits')
@@ -257,7 +294,36 @@ export class AssetController {
     description: 'Removes all edit actions (crop, rotate, mirror) associated with the specified asset.',
     history: new HistoryBuilder().added('v2.5.0').beta('v2.5.0'),
   })
-  removeAssetEdits(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
-    return this.service.removeAssetEdits(auth, id);
+  async removeAssetEdits(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
+    await this.service.removeAssetEdits(auth, id);
+  }
+
+  @Put(':id/edits/versioned')
+  @ApiExcludeEndpoint()
+  @Authenticated({ permission: Permission.AssetEditCreate })
+  async editAssetVersioned(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Body() dto: AssetEditsCreateDto,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AssetEditsResponseDto> {
+    const { edits, etag } = await this.service.editAsset(auth, id, dto, requireEditETag(ifMatch));
+    response.setHeader('ETag', etag);
+    return { assetId: id, edits };
+  }
+
+  @Delete(':id/edits/versioned')
+  @ApiExcludeEndpoint()
+  @Authenticated({ permission: Permission.AssetEditDelete })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeAssetEditsVersioned(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<void> {
+    const { etag } = await this.service.removeAssetEdits(auth, id, requireEditETag(ifMatch));
+    response.setHeader('ETag', etag);
   }
 }

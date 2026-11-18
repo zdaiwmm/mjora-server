@@ -136,6 +136,7 @@ describe(ServerService.name, () => {
       await expect(sut.getFeatures()).resolves.toEqual({
         backgroundUploadsV1: true,
         photoEditsV1: true,
+        photoEditsCASV1: true,
         smartSearch: true,
         duplicateDetection: true,
         facialRecognition: true,

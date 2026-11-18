@@ -945,14 +945,16 @@ describe(AssetService.name, () => {
       const editAction = { action: AssetEditAction.Rotate, parameters: { angle: 90 } } as const;
       const editResponse = { ...editAction, id: expect.any(String) };
       await expect(sut.editAsset(auth, asset.id, { edits: [editAction] })).resolves.toEqual({
-        assetId: asset.id,
+        etag: expect.any(String),
         edits: [editResponse],
       });
 
       await expect(ctx.get(AssetRepository).getById(asset.id)).resolves.toEqual(
         expect.objectContaining({ isEdited: true }),
       );
-      await expect(ctx.get(AssetEditRepository).getAll(asset.id)).resolves.toEqual([editResponse]);
+      await expect(ctx.get(AssetEditRepository).getSnapshot(asset.id)).resolves.toMatchObject({
+        edits: [editResponse],
+      });
     });
   });
 });

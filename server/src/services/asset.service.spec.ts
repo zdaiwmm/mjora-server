@@ -814,7 +814,7 @@ describe(AssetService.name, () => {
 
     it('does not read private edit intent when access is denied', async () => {
       await expect(sut.getAssetEdits(authStub.admin, 'private')).rejects.toBeInstanceOf(BadRequestException);
-      expect(mocks.assetEdit.getAll).not.toHaveBeenCalled();
+      expect(mocks.assetEdit.getSnapshot).not.toHaveBeenCalled();
     });
 
     it('returns complete accepted photo intent', async () => {
@@ -824,11 +824,30 @@ describe(AssetService.name, () => {
       const dto = AssetEditsCreateDto.schema.parse({
         edits: [{ action: 'photo', parameters: { version: 1, exposure: 0.125, horizontalPerspective: -0.5 } }],
       });
-      mocks.assetEdit.replaceAll.mockResolvedValue([{ id: 'edit', ...dto.edits[0] }]);
+      const etag = '"revision"';
+      mocks.assetEdit.replaceAll.mockResolvedValue({
+        status: 'committed',
+        snapshot: { etag, edits: [{ id: 'edit', ...dto.edits[0] }] },
+      });
       await expect(sut.editAsset(authStub.admin, asset.id, dto)).resolves.toEqual({
-        assetId: asset.id,
+        etag,
         edits: [{ id: 'edit', ...dto.edits[0] }],
       });
+    });
+
+    it('rejects stale saves and clears without queuing thumbnail regeneration', async () => {
+      const asset = AssetFactory.from().exif({ exifImageWidth: 100, exifImageHeight: 100 }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getForEdit.mockResolvedValue({ ...asset, ...asset.exifInfo });
+      mocks.assetEdit.replaceAll.mockResolvedValue({ status: 'stale' });
+      const etag = '"older-revision"';
+      const edits = [{ action: AssetEditAction.Rotate, parameters: { angle: 90 } }];
+
+      await expect(sut.editAsset(authStub.admin, asset.id, { edits }, etag)).rejects.toMatchObject({ status: 412 });
+      await expect(sut.removeAssetEdits(authStub.admin, asset.id, etag)).rejects.toMatchObject({ status: 412 });
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith(asset.id, edits, etag);
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith(asset.id, [], etag);
+      expect(mocks.job.queue).not.toHaveBeenCalled();
     });
 
     it('should enforce crop first', async () => {

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { isUndefined, omitBy } from 'lodash-es';
 import { DateTime, Duration } from 'luxon';
 import type { AssetFile } from 'src/database.js';
@@ -20,12 +20,7 @@ import {
   mapStats,
 } from 'src/dtos/asset.dto.js';
 import type { AuthDto } from 'src/dtos/auth.dto.js';
-import {
-  AssetEditAction,
-  AssetEditsCreateDto,
-  AssetEditsResponseDto,
-  type AssetEditActionItem,
-} from 'src/dtos/editing.dto.js';
+import { AssetEditAction, AssetEditsCreateDto, type AssetEditActionItem } from 'src/dtos/editing.dto.js';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto.js';
 import {
   AssetFileType,
@@ -37,6 +32,7 @@ import {
   Permission,
   QueueName,
 } from 'src/enum.js';
+import type { AssetEditSnapshot } from 'src/repositories/asset-edit.repository.js';
 import { BaseService } from 'src/services/base.service.js';
 import type { JobItem, JobOf } from 'src/types.js';
 import { requireElevatedPermission } from 'src/utils/access.js';
@@ -531,17 +527,16 @@ export class AssetService extends BaseService {
     return true;
   }
 
-  async getAssetEdits(auth: AuthDto, id: string): Promise<AssetEditsResponseDto> {
+  async getAssetEdits(auth: AuthDto, id: string): Promise<AssetEditSnapshot> {
     await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
-    const edits = await this.assetEditRepository.getAll(id);
-
-    return {
-      assetId: id,
-      edits,
-    };
+    const snapshot = await this.assetEditRepository.getSnapshot(id);
+    if (!snapshot) {
+      throw new BadRequestException('Asset not found');
+    }
+    return snapshot;
   }
 
-  async editAsset(auth: AuthDto, id: string, dto: AssetEditsCreateDto): Promise<AssetEditsResponseDto> {
+  async editAsset(auth: AuthDto, id: string, dto: AssetEditsCreateDto, ifMatch?: string): Promise<AssetEditSnapshot> {
     await this.requireAccess({ auth, permission: Permission.AssetEditCreate, ids: [id] });
 
     const asset = await this.assetRepository.getForEdit(id);
@@ -599,25 +594,27 @@ export class AssetService extends BaseService {
       }
     }
 
-    const newEdits = await this.assetEditRepository.replaceAll(id, edits);
-    await this.jobRepository.queue({ name: JobName.AssetEditThumbnailGeneration, data: { id } });
-
-    // Return the asset and its applied edits
-    return {
-      assetId: id,
-      edits: newEdits,
-    };
+    return this.replaceAssetEdits(id, edits, ifMatch);
   }
 
-  async removeAssetEdits(auth: AuthDto, id: string): Promise<void> {
+  async removeAssetEdits(auth: AuthDto, id: string, ifMatch?: string): Promise<AssetEditSnapshot> {
     await this.requireAccess({ auth, permission: Permission.AssetEditDelete, ids: [id] });
+    return this.replaceAssetEdits(id, [], ifMatch);
+  }
 
-    const asset = await this.assetRepository.getById(id);
-    if (!asset) {
+  private async replaceAssetEdits(
+    id: string,
+    edits: AssetEditActionItem[],
+    ifMatch?: string,
+  ): Promise<AssetEditSnapshot> {
+    const result = await this.assetEditRepository.replaceAll(id, edits, ifMatch);
+    if (result.status === 'missing') {
       throw new BadRequestException('Asset not found');
     }
-
-    await this.assetEditRepository.replaceAll(id, []);
+    if (result.status === 'stale') {
+      throw new HttpException('Asset edits have changed', HttpStatus.PRECONDITION_FAILED);
+    }
     await this.jobRepository.queue({ name: JobName.AssetEditThumbnailGeneration, data: { id } });
+    return result.snapshot;
   }
 }
