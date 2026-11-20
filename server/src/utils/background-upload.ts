@@ -8,6 +8,7 @@ import type { AssetMediaCreateDto } from 'src/dtos/asset-media.dto.js';
 
 export const backgroundPartBytes = 8 * 1024 * 1024;
 const lifetime = 7 * 24 * 60 * 60 * 1000;
+const inactivityLifetime = 24 * 60 * 60 * 1000;
 
 export type BackgroundUpload = {
   id: string;
@@ -18,6 +19,7 @@ export type BackgroundUpload = {
   key: string;
   capability: string;
   expiresAt: number;
+  updatedAt?: number;
   metadata: AssetMediaCreateDto;
   result?: AssetMediaResponseDto;
 };
@@ -56,6 +58,7 @@ export class BackgroundUploadStore {
   }
 
   async save(value: BackgroundUpload) {
+    value.updatedAt = Date.now();
     const directory = this.directory(value.id);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const temporary = join(directory, `${randomUUID()}.json.tmp`);
@@ -80,7 +83,11 @@ export class BackgroundUploadStore {
       .update(JSON.stringify([owner, checksum, size, metadata]))
       .digest('hex');
     try {
-      return await this.read(id);
+      const existing = await this.read(id);
+      // Reopening an interrupted transfer is progress and must protect it from
+      // stale-session reclamation even before the next part arrives.
+      await this.save(existing);
+      return existing;
     } catch (error) {
       if (!(error instanceof NotFoundException)) {
         throw error;
@@ -90,12 +97,20 @@ export class BackgroundUploadStore {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     let active = 0;
     let reserved = 0;
+    const now = Date.now();
     for (const name of await readdir(this.root)) {
       if (!/^[a-f\d]{64}$/.test(name)) {
         continue;
       }
       try {
         const item = await this.read(name);
+        const statePath = join(this.directory(name), 'state.json');
+        const state = await stat(statePath);
+        const lastActivity = item.updatedAt ?? state.mtimeMs;
+        if (item.expiresAt < now || lastActivity < now - inactivityLifetime) {
+          await this.remove(item);
+          continue;
+        }
         if (!item.result) {
           // Existing acknowledged bytes already occupy disk, but the final
           // import still needs a complete copy in the media upload directory.
