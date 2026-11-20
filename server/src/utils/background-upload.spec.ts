@@ -106,4 +106,38 @@ describe('encrypted background upload recovery', () => {
     await store.remove(value);
     await expect(store.read(value.id)).rejects.toThrow();
   });
+
+  it('reclaims an inactive session before enforcing the per-account cap', async () => {
+    const values: BackgroundUpload[] = [];
+    for (let index = 0; index < 16; index++) {
+      values.push(
+        await store.start('owner', createHash('sha1').update(String(index)).digest('base64'), 10, {
+          ...metadata,
+          filename: `${index}.jpg`,
+        }),
+      );
+    }
+    await expect(store.start('owner', createHash('sha1').update('17').digest('base64'), 10, metadata)).rejects.toThrow(
+      'Too many unfinished background uploads',
+    );
+
+    const stale = values[0];
+    const statePath = join(store.directory(stale.id), 'state.json');
+    await writeFile(statePath, JSON.stringify({ ...stale, updatedAt: Date.now() - 25 * 60 * 60 * 1000 }));
+
+    await expect(
+      store.start('owner', createHash('sha1').update('17').digest('base64'), 10, metadata),
+    ).resolves.toBeDefined();
+    await expect(store.read(stale.id)).rejects.toThrow();
+  });
+
+  it('refreshes activity when an interrupted session is reopened', async () => {
+    const value = await store.start('owner', Buffer.alloc(20).toString('base64'), 10, metadata);
+    const statePath = join(store.directory(value.id), 'state.json');
+    await writeFile(statePath, JSON.stringify({ ...value, updatedAt: Date.now() - 25 * 60 * 60 * 1000 }));
+
+    const reopened = await store.start('owner', value.checksum, value.size, value.metadata);
+    expect(reopened.id).toBe(value.id);
+    expect(reopened.updatedAt).toBeGreaterThan(Date.now() - 5000);
+  });
 });

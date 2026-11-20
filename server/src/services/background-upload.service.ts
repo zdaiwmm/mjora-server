@@ -59,6 +59,7 @@ export class BackgroundUploadService {
       const store = this.store;
       const value = await store.read(id);
       store.requireOwner(value, auth.user.id);
+      await store.save(value);
       // This lookup also rechecks current upload permission.
       const duplicate = await this.assets.getUploadAssetIdByChecksum(auth, value.checksum);
       if (duplicate) {
