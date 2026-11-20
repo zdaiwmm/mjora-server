@@ -8,6 +8,7 @@ import type { AssetMediaCreateDto } from 'src/dtos/asset-media.dto.js';
 
 export const backgroundPartBytes = 8 * 1024 * 1024;
 const lifetime = 7 * 24 * 60 * 60 * 1000;
+const inactivityLifetime = 24 * 60 * 60 * 1000;
 
 export type BackgroundUpload = {
   id: string;
@@ -18,6 +19,7 @@ export type BackgroundUpload = {
   key: string;
   capability: string;
   expiresAt: number;
+  updatedAt?: number;
   metadata: AssetMediaCreateDto;
   result?: AssetMediaResponseDto;
 };
@@ -56,6 +58,7 @@ export class BackgroundUploadStore {
   }
 
   async save(value: BackgroundUpload) {
+    value.updatedAt = Date.now();
     const directory = this.directory(value.id);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const temporary = join(directory, `${randomUUID()}.json.tmp`);
@@ -75,15 +78,36 @@ export class BackgroundUploadStore {
     }
   }
 
+  private async isInactive(value: BackgroundUpload) {
+    const now = Date.now();
+    if (value.expiresAt < now) {
+      return true;
+    }
+    const state = await stat(join(this.directory(value.id), 'state.json'));
+    const lastActivity = value.updatedAt ?? state.mtimeMs;
+    return lastActivity < now - inactivityLifetime;
+  }
+
   async start(owner: string, checksum: string, size: number, metadata: AssetMediaCreateDto) {
     const id = createHash('sha256')
       .update(JSON.stringify([owner, checksum, size, metadata]))
       .digest('hex');
+    let existing: BackgroundUpload | undefined;
     try {
-      return await this.read(id);
+      existing = await this.read(id);
     } catch (error) {
       if (!(error instanceof NotFoundException)) {
         throw error;
+      }
+    }
+    if (existing) {
+      if (await this.isInactive(existing)) {
+        await this.remove(existing);
+      } else {
+        // Reopening an interrupted transfer is progress and must protect it from
+        // stale-session reclamation even before the next part arrives.
+        await this.save(existing);
+        return existing;
       }
     }
     // Bound abandoned uploads, including their disk reservations, per account.
@@ -96,6 +120,10 @@ export class BackgroundUploadStore {
       }
       try {
         const item = await this.read(name);
+        if (await this.isInactive(item)) {
+          await this.remove(item);
+          continue;
+        }
         if (!item.result) {
           // Existing acknowledged bytes already occupy disk, but the final
           // import still needs a complete copy in the media upload directory.
