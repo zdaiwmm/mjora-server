@@ -131,13 +131,24 @@ describe('encrypted background upload recovery', () => {
     await expect(store.read(stale.id)).rejects.toThrow();
   });
 
-  it('refreshes activity when an interrupted session is reopened', async () => {
+  it('refreshes activity when a recent interrupted session is reopened', async () => {
     const value = await store.start('owner', Buffer.alloc(20).toString('base64'), 10, metadata);
     const statePath = join(store.directory(value.id), 'state.json');
-    await writeFile(statePath, JSON.stringify({ ...value, updatedAt: Date.now() - 25 * 60 * 60 * 1000 }));
+    await writeFile(statePath, JSON.stringify({ ...value, updatedAt: Date.now() - 23 * 60 * 60 * 1000 }));
 
     const reopened = await store.start('owner', value.checksum, value.size, value.metadata);
     expect(reopened.id).toBe(value.id);
+    expect(reopened.updatedAt).toBeGreaterThan(Date.now() - 5000);
+  });
+
+  it('resets an inactive session even when it is the next requested item', async () => {
+    const value = await store.start('owner', Buffer.alloc(20).toString('base64'), 10, metadata);
+    const statePath = join(store.directory(value.id), 'state.json');
+    await writeFile(statePath, JSON.stringify({ ...value, offset: 5, updatedAt: Date.now() - 25 * 60 * 60 * 1000 }));
+
+    const reopened = await store.start('owner', value.checksum, value.size, value.metadata);
+    expect(reopened.id).toBe(value.id);
+    expect(reopened.offset).toBe(0);
     expect(reopened.updatedAt).toBeGreaterThan(Date.now() - 5000);
   });
 });

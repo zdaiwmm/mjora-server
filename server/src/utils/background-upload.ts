@@ -78,36 +78,49 @@ export class BackgroundUploadStore {
     }
   }
 
+  private async isInactive(value: BackgroundUpload) {
+    const now = Date.now();
+    if (value.expiresAt < now) {
+      return true;
+    }
+    const state = await stat(join(this.directory(value.id), 'state.json'));
+    const lastActivity = value.updatedAt ?? state.mtimeMs;
+    return lastActivity < now - inactivityLifetime;
+  }
+
   async start(owner: string, checksum: string, size: number, metadata: AssetMediaCreateDto) {
     const id = createHash('sha256')
       .update(JSON.stringify([owner, checksum, size, metadata]))
       .digest('hex');
+    let existing: BackgroundUpload | undefined;
     try {
-      const existing = await this.read(id);
-      // Reopening an interrupted transfer is progress and must protect it from
-      // stale-session reclamation even before the next part arrives.
-      await this.save(existing);
-      return existing;
+      existing = await this.read(id);
     } catch (error) {
       if (!(error instanceof NotFoundException)) {
         throw error;
+      }
+    }
+    if (existing) {
+      if (await this.isInactive(existing)) {
+        await this.remove(existing);
+      } else {
+        // Reopening an interrupted transfer is progress and must protect it from
+        // stale-session reclamation even before the next part arrives.
+        await this.save(existing);
+        return existing;
       }
     }
     // Bound abandoned uploads, including their disk reservations, per account.
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     let active = 0;
     let reserved = 0;
-    const now = Date.now();
     for (const name of await readdir(this.root)) {
       if (!/^[a-f\d]{64}$/.test(name)) {
         continue;
       }
       try {
         const item = await this.read(name);
-        const statePath = join(this.directory(name), 'state.json');
-        const state = await stat(statePath);
-        const lastActivity = item.updatedAt ?? state.mtimeMs;
-        if (item.expiresAt < now || lastActivity < now - inactivityLifetime) {
+        if (await this.isInactive(item)) {
           await this.remove(item);
           continue;
         }
